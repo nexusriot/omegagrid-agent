@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      - DATA_DIR=/app/data
+      - OLLAMA_URL=${OLLAMA_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+      - OLLAMA_TIMEOUT=${OLLAMA_TIMEOUT}
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL}
+      - AGENT_DB=/app/data/agent_memory.sqlite3
+      - AGENT_VECTOR_DIR=/app/data/vector_db
+      - AGENT_VECTOR_COLLECTION=${AGENT_VECTOR_COLLECTION}
+      - AGENT_CONTEXT_TAIL=${AGENT_CONTEXT_TAIL}
+      - AGENT_MEMORY_HITS=${AGENT_MEMORY_HITS}
+      - AGENT_DEDUP_DISTANCE=${AGENT_DEDUP_DISTANCE}
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "${BACKEND_PORT}:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT}:80"
