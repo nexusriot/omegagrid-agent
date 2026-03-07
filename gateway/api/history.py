@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
