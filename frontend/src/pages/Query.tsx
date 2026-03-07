@@ -57,7 +57,6 @@ export default function Query() {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      // ignore
     }
   }
 

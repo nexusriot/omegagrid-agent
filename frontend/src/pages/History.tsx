@@ -38,7 +38,6 @@ export default function History() {
         setErr(String(e));
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

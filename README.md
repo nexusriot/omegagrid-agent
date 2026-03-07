@@ -1,46 +1,36 @@
-# Ollama Agent Stack (SQLite + Vector Memory)
+# Agent Platform
+This archive integrates the current working agent code into a more production-oriented layout:
 
-This stack provides:
-- FastAPI backend: agent + SQLite history + ChromaDB vector memory (Ollama embeddings)
-- React frontend (Vite build served by nginx)
-- docker-compose with persistent host storage in `./data`
+- `gateway/` — FastAPI entrypoint and API routes
+- `core/` — orchestration logic
+- `memory/` — SQLite history + Chroma vector memory
+- `llm/` — Ollama chat / embeddings clients
+- `tools/` — tool registry and tool adapters
+- `observability/` — timings / tracing helpers
+- `integrations/` — CLI + Telegram skeleton
+- `frontend/` — React UI (Query + History)
 
-## Requirements
-- Docker + docker-compose
-- Local Ollama running on the host
-- An embeddings model installed in Ollama (example):
-  - `ollama pull nomic-embed-text`
+## Run
 
-## Run (docker-compose)
-1. Edit `.env` if needed.
-   - On Linux, `host.docker.internal` may not work. Use your host IP or run Ollama in a container.
-2. Start:
-   - `docker compose up --build`
+```bash
+cp .env.example .env
+docker compose up --build
+```
 
-Frontend:
-- http://localhost:${FRONTEND_PORT}
+## Notes
 
-Backend:
-- http://localhost:${BACKEND_PORT}/health
+- Backend build context is the project root so `gateway/` can import `core/`, `memory/`, `llm/`, etc.
+- Vector memory uses ChromaDB with local persistence in `./data/vector_db`.
+- SQLite history persists in `./data/agent_memory.sqlite3`.
+- Ollama chat uses `/api/chat`.
+- Embeddings client tries:
+  1. `/api/embed`
+  2. `/v1/embeddings`
+  3. `/api/embeddings`
 
-## API
-- POST `/api/query`  { query, session_id?, remember?, max_steps? }
-- GET  `/api/sessions`
-- POST `/api/sessions/new`
-- POST `/api/memory/add`
-- POST `/api/memory/search`
+## Next recommended steps
 
-## CLI (REST)
-From host (outside docker), with backend running:
-- `python backend/cli.py --api http://localhost:8000 --new`
-- `python backend/cli.py --api http://localhost:8000 --session 1 "hello"`
-
-## Persistence
-All persistent data goes to `./data`:
-- `./data/agent_memory.sqlite3`
-- `./data/vector_db/` (Chroma)
-
-## Deduplication
-When storing a memory item:
-1) Exact dedup by SHA-256 hash stored in metadata
-2) Semantic dedup by nearest neighbor distance <= `AGENT_DEDUP_DISTANCE` (cosine space)
+1. Replace Telegram skeleton with real handlers wired to gateway.
+2. Add streaming endpoint (`/api/query/stream`).
+3. Add Memory page for manual add/search/edit in frontend.
+4. Add request IDs and structured logs.

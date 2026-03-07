@@ -1,6 +1,10 @@
 services:
-  backend:
-    build: ./backend
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    env_file:
+      - .env
     environment:
       - DATA_DIR=/app/data
       - OLLAMA_URL=${OLLAMA_URL}
@@ -19,8 +23,10 @@ services:
       - "${BACKEND_PORT}:8000"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     depends_on:
-      - backend
+      - gateway
     ports:
       - "${FRONTEND_PORT}:80"
