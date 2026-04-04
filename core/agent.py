@@ -7,31 +7,31 @@ from typing import Any, Dict, List, Optional
 
 from observability.timing import Timer
 
-SYSTEM_PROMPT = """
+_SYSTEM_PROMPT_TEMPLATE = """
 You are a compact tool-using agent.
 
 You have tools:
-- vector_add(text, meta={...})
+- vector_add(text, meta={{...}})
 - vector_search(query, k=5)
-
+{skills_block}
 You may also answer directly without tool calls.
 
 You must ALWAYS output STRICT JSON, in one of the two forms:
 
 A) Tool call:
-{
+{{
   "type": "tool_call",
   "tool": "<tool_name>",
-  "args": { ... },
+  "args": {{ ... }},
   "why": "<short reason>"
-}
+}}
 
 B) Final answer:
-{
+{{
   "type": "final",
   "answer": "<answer to the user>",
   "notes": "<optional constraints/assumptions>"
-}
+}}
 
 Rules:
 - Never fabricate tool results.
@@ -40,6 +40,15 @@ Rules:
 - In type="final", answer MUST be a string (not an object/array).
 - Keep tool args minimal and valid.
 """.strip()
+
+
+def _build_system_prompt(skill_registry=None) -> str:
+    skills_block = ""
+    if skill_registry:
+        desc = skill_registry.describe_for_prompt()
+        if desc:
+            skills_block = f"\nYou also have skills (call them like tools):\n{desc}\n"
+    return _SYSTEM_PROMPT_TEMPLATE.format(skills_block=skills_block)
 
 
 def _parse_json_safely(text: str) -> Dict[str, Any]:
@@ -65,15 +74,17 @@ def _format_memory_hits(hits: List[Dict[str, Any]]) -> str:
 
 
 class AgentService:
-    def __init__(self, history_store, vector_store, chat_client, tool_registry, context_tail: int = 30, memory_hits: int = 5):
+    def __init__(self, history_store, vector_store, chat_client, tool_registry,
+                 skill_registry=None, context_tail: int = 30, memory_hits: int = 5):
         self.history_store = history_store
         self.vector_store = vector_store
         self.chat_client = chat_client
         self.tool_registry = tool_registry
+        self.skill_registry = skill_registry
         self.context_tail = context_tail
         self.memory_hits = memory_hits
 
-    def run(self, query: str, session_id: Optional[int], remember: bool = True, max_steps: int = 6) -> dict[str, Any]:
+    def run(self, query: str, session_id: Optional[int] = None, remember: bool = True, max_steps: int = 6) -> dict[str, Any]:
         timer = Timer()
         sid = session_id or self.history_store.create_session()
         debug_lines: List[str] = []
@@ -91,8 +102,10 @@ class AgentService:
         tail = self.history_store.load_tail(sid, limit=self.context_tail)
         timer.mark("sqlite_load_tail_s")
 
+        system_prompt = _build_system_prompt(self.skill_registry)
+
         messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "system", "content": _format_memory_hits(memories)},
             *tail,
             {"role": "user", "content": query},
@@ -111,6 +124,13 @@ class AgentService:
             "vector_search": vector_search,
         }
 
+        # Register skills as callable tools
+        if self.skill_registry:
+            for skill_name in self.skill_registry.list_names():
+                skill = self.skill_registry.get(skill_name)
+                # Use default arg to capture current skill in closure
+                tools[skill_name] = lambda _s=skill, **kw: _s.execute(**kw)
+
         for step in range(1, max_steps + 1):
             debug_lines.append(f"[agent] step={step}")
             raw, llm_s = self.chat_client.complete_json(messages)
@@ -128,7 +148,6 @@ class AgentService:
                 self.history_store.add_message(sid, "assistant", answer)
 
                 if remember and answer.strip():
-                    # safe minimal auto-memory: only store short structured summaries if model explicitly asks via tool
                     pass
 
                 timings.update(timer.as_dict())

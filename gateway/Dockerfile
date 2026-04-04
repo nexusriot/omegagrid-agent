@@ -12,6 +12,7 @@ COPY core /app/core
 COPY memory /app/memory
 COPY llm /app/llm
 COPY tools /app/tools
+COPY skills /app/skills
 COPY observability /app/observability
 COPY integrations /app/integrations
 
