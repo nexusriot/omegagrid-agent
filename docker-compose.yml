@@ -40,15 +40,15 @@ services:
       - "${FRONTEND_PORT}:80"
 
   # Uncomment to run the Telegram bot as a service
-  # telegram-bot:
-  #   build:
-  #     context: .
-  #     dockerfile: gateway/Dockerfile
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-  #     - GATEWAY_URL=http://gateway:8000
-  #   depends_on:
-  #     - gateway
-  #   command: ["python", "-m", "integrations.telegram.run"]
+  telegram-bot:
+     build:
+       context: .
+       dockerfile: gateway/Dockerfile
+     env_file:
+       - .env
+     environment:
+       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+       - GATEWAY_URL=http://gateway:8000
+     depends_on:
+       - gateway
+     command: ["python", "-m", "integrations.telegram.run"]
