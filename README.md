@@ -1,6 +1,12 @@
 # OmegaGrid Agent
 
-AI agent platform with tool-calling loop, vector memory, conversation history, skills system, and multi-provider LLM support.
+PoC AI agent platform __which we deserve__ with tool-calling loop, vector memory, conversation history, skills system, and multi-provider LLM support.
+
+
+<p align="center" width="100%">
+    <img width="70%" src="b-claw.png"> 
+</p>
+
 
 ## Architecture
 
