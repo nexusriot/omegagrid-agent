@@ -1,17 +1,15 @@
-const API_BASE = ""; // same-origin via nginx proxy
-
 export async function apiGet(path: string) {
-  const r = await fetch(`${API_BASE}${path}`);
+  const r = await fetch(path);
   if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  return await r.json();
 }
 
-export async function apiPost(path: string, body: any, headers: Record<string,string> = {}) {
-  const r = await fetch(`${API_BASE}${path}`, {
+export async function apiPost(path: string, body: any) {
+  const r = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  return await r.json();
 }

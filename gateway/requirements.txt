@@ -3,3 +3,5 @@ uvicorn[standard]==0.30.6
 requests==2.32.3
 chromadb==0.5.5
 pydantic==2.9.2
+python-telegram-bot==21.10
+openai==1.82.0
