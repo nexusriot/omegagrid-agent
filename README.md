@@ -1,6 +1,9 @@
 # OmegaGrid Agent
 
-PoC AI agent platform __which we deserve__ with tool-calling loop, vector memory, conversation history, skills system, and multi-provider LLM support. /b/-lobster way!
+PoC AI agent platform __which we deserve__ with tool-calling loop, vector memory, conversation history, skills system, and multi-provider LLM support. 
+
+
+### /b/-lobster way!
 
 
 <p align="center" width="100%">

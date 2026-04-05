@@ -125,11 +125,14 @@ class AgentService:
         }
 
         # Register skills as callable tools
+        skill_names = []
         if self.skill_registry:
             for skill_name in self.skill_registry.list_names():
                 skill = self.skill_registry.get(skill_name)
-                # Use default arg to capture current skill in closure
                 tools[skill_name] = lambda _s=skill, **kw: _s.execute(**kw)
+                skill_names.append(skill_name)
+        debug_lines.append(f"[init] tools={list(tools.keys())}")
+        debug_lines.append(f"[init] skills={skill_names}")
 
         for step in range(1, max_steps + 1):
             debug_lines.append(f"[agent] step={step}")
@@ -182,19 +185,24 @@ class AgentService:
 
             tool = data.get("tool")
             args = data.get("args", {}) or {}
-            debug_lines.append(f"[tool] call={tool} args={args}")
+            is_skill = tool in skill_names
+            kind = "skill" if is_skill else "tool"
+            debug_lines.append(f"[{kind}] call={tool} args={args} reason={data.get('why', '-')}")
 
             if tool not in tools:
-                tool_result = {"error": f"Unknown tool: {tool}", "available": list(tools.keys())}
+                tool_result = {"error": f"Unknown tool/skill: {tool}", "available": list(tools.keys())}
+                debug_lines.append(f"[{kind}] ERROR unknown name '{tool}'")
             else:
                 t0 = time.perf_counter()
                 try:
                     tool_result = tools[tool](**args)
                 except Exception as e:
                     tool_result = {"error": str(e), "tool": tool, "args": args}
-                timings.setdefault("tool_s_total", 0.0)
-                timings["tool_s_total"] += time.perf_counter() - t0
-                debug_lines.append(f"[tool] result={str(tool_result)[:200]}")
+                elapsed = time.perf_counter() - t0
+                timing_key = "skill_s_total" if is_skill else "tool_s_total"
+                timings.setdefault(timing_key, 0.0)
+                timings[timing_key] += elapsed
+                debug_lines.append(f"[{kind}] result={str(tool_result)[:200]} ({elapsed:.3f}s)")
 
             self.history_store.add_message(sid, "tool", tool_result)
             messages.append({"role": "assistant", "content": json.dumps(data, ensure_ascii=False)})
