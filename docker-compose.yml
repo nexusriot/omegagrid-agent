@@ -17,6 +17,8 @@ services:
       - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-gpt-4o-mini}
       - OPENAI_EMBED_MODEL=${OPENAI_EMBED_MODEL:-text-embedding-3-small}
       - OPENAI_TIMEOUT=${OPENAI_TIMEOUT:-120}
+      - OPENAI_API_MODE=${OPENAI_API_MODE:-}
+      - OPENAI_REASONING_EFFORT=${OPENAI_REASONING_EFFORT:-medium}
       - AGENT_DB=/app/data/agent_memory.sqlite3
       - AGENT_VECTOR_DIR=/app/data/vector_db
       - AGENT_VECTOR_COLLECTION=${AGENT_VECTOR_COLLECTION}
@@ -49,6 +51,9 @@ services:
      environment:
        - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
        - GATEWAY_URL=http://gateway:8000
+       - BOT_AUTH_ENABLED=${BOT_AUTH_ENABLED:-false}
+       - BOT_ADMIN_ID=${BOT_ADMIN_ID:-0}
+       - BOT_AUTH_DB=${BOT_AUTH_DB:-/app/data/telegram_auth.sqlite3}
      depends_on:
        - gateway
      command: ["python", "-m", "integrations.telegram.run"]

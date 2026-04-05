@@ -5,6 +5,7 @@ from typing import Any
 
 import requests
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,24 @@ _sessions: dict[int, int] = {}
 def set_gateway_url(url: str):
     global _gateway_url
     _gateway_url = url.rstrip("/")
+
+
+def _get_auth_store(context: ContextTypes.DEFAULT_TYPE):
+    return context.application.bot_data.get("auth_store")
+
+
+async def _ensure_authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    store = _get_auth_store(context)
+    if not store:
+        return True
+
+    chat_id = update.effective_chat.id
+    if not store.is_authorized(chat_id):
+        await update.message.reply_text("Access denied. Ask the bot admin to allow your Telegram ID.")
+        return False
+
+    store.touch(chat_id)
+    return True
 
 
 def _query_agent(text: str, chat_id: int) -> dict[str, Any]:
@@ -40,6 +59,12 @@ def _query_agent(text: str, chat_id: int) -> dict[str, Any]:
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     _sessions.pop(chat_id, None)
+
+    store = _get_auth_store(context)
+    auth_extra = ""
+    if store and store.is_enabled():
+        auth_extra = f"\n\nYour Telegram ID: `{chat_id}`"
+
     await update.message.reply_text(
         "Hello! I'm the OmegaGrid Agent bot.\n\n"
         "Just send me any message and I'll process it through the agent.\n\n"
@@ -47,11 +72,18 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start - Reset session & show this help\n"
         "/ask <question> - Ask the agent explicitly\n"
         "/new - Start a new session\n"
-        "/skills - List available skills"
+        "/skills - List available skills\n"
+        "/auth_add <telegram_id> - Admin only, allow a user\n"
+        "/auth_list - Admin only, list allowed users"
+        f"{auth_extra}",
+        parse_mode=ParseMode.MARKDOWN,
     )
 
 
 async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _ensure_authorized(update, context):
+        return
+
     text = " ".join(context.args).strip() if context.args else ""
     if not text:
         await update.message.reply_text("Usage: /ask <your question>")
@@ -66,7 +98,7 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         steps = result.get("meta", {}).get("step_count", "?")
         await update.message.reply_text(
             f"{answer}\n\n_model: {model} | steps: {steps}_",
-            parse_mode="Markdown",
+            parse_mode=ParseMode.MARKDOWN,
         )
     except Exception as e:
         logger.exception("Agent query failed")
@@ -74,12 +106,16 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def new_session_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _ensure_authorized(update, context):
+        return
     chat_id = update.effective_chat.id
     _sessions.pop(chat_id, None)
     await update.message.reply_text("Session reset. Next message starts a fresh conversation.")
 
 
 async def skills_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _ensure_authorized(update, context):
+        return
     try:
         resp = requests.get(f"{_gateway_url}/api/skills", timeout=10)
         resp.raise_for_status()
@@ -90,13 +126,58 @@ async def skills_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = ["Available skills:"]
         for s in skills:
             lines.append(f"- *{s['name']}*: {s['description']}")
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         await update.message.reply_text(f"Error listing skills: {e}")
 
 
+async def auth_add_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    store = _get_auth_store(context)
+    chat_id = update.effective_chat.id
+    if not store or not store.is_enabled():
+        await update.message.reply_text("Auth is disabled.")
+        return
+    if not store.is_admin(chat_id):
+        await update.message.reply_text("Only the admin can add users.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /auth_add <telegram_id>")
+        return
+    try:
+        new_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("telegram_id must be an integer.")
+        return
+    store.add_user(new_id)
+    await update.message.reply_text(f"Authorized Telegram ID: {new_id}")
+
+
+async def auth_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    store = _get_auth_store(context)
+    chat_id = update.effective_chat.id
+    if not store or not store.is_enabled():
+        await update.message.reply_text("Auth is disabled.")
+        return
+    if not store.is_admin(chat_id):
+        await update.message.reply_text("Only the admin can list users.")
+        return
+
+    users = store.list_users(limit=100)
+    lines = [f"Admin: `{store.admin_id}`"]
+    if not users:
+        lines.append("No authorized users yet.")
+    else:
+        lines.append("Authorized users:")
+        for user in users:
+            lines.append(f"- `{user.telegram_id}` | created={user.created_at} | last={user.last_activity}")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle plain text messages - route them to the agent."""
+    if not await _ensure_authorized(update, context):
+        return
+
     text = (update.message.text or "").strip()
     if not text:
         return
