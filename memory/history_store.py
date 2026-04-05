@@ -48,6 +48,9 @@ class HistoryStore:
         out: List[Dict[str, Any]] = []
         for row in rows:
             payload = json.loads(row["content_json"])
+            # Skip old raw_model_json debug entries — they pollute LLM context
+            if isinstance(payload, dict) and "raw_model_json" in payload:
+                continue
             if isinstance(payload, dict) and "content" in payload and len(payload) == 1:
                 content = payload["content"]
             else:

@@ -64,11 +64,18 @@ def _build_system_prompt(skill_registry=None) -> str:
 def _parse_json_safely(text: str) -> Dict[str, Any]:
     text = (text or "").strip()
     if text.startswith("{") and text.endswith("}"):
-        return json.loads(text)
-    m = re.search(r"\{.*\}", text, flags=re.S)
-    if not m:
-        raise ValueError(f"Model did not return JSON. Got: {text[:300]}")
-    return json.loads(m.group(0))
+        data = json.loads(text)
+    else:
+        m = re.search(r"\{.*\}", text, flags=re.S)
+        if not m:
+            raise ValueError(f"Model did not return JSON. Got: {text[:300]}")
+        data = json.loads(m.group(0))
+    # Unwrap if model echoed the old history storage format
+    if isinstance(data, dict) and "raw_model_json" in data and len(data) == 1:
+        inner = data["raw_model_json"]
+        if isinstance(inner, str):
+            data = json.loads(inner)
+    return data
 
 
 def _format_memory_hits(hits: List[Dict[str, Any]]) -> str:
