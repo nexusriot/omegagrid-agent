@@ -14,6 +14,10 @@ from skills.weather import WeatherSkill
 from skills.datetime_skill import DateTimeSkill
 from skills.http_request import HttpRequestSkill
 from skills.shell_command import ShellCommandSkill
+from skills.web_scrape import WebScrapeSkill
+from skills.dns_lookup import DnsLookupSkill
+from skills.cron_schedule import CronScheduleSkill
+from skills.ping_check import PingCheckSkill
 
 
 @dataclass
@@ -85,6 +89,12 @@ def build_container() -> Container:
     ))
     shell_enabled = os.environ.get("SKILL_SHELL_ENABLED", "false").lower() in ("true", "1", "yes")
     skills.register(ShellCommandSkill(enabled=shell_enabled))
+    skills.register(WebScrapeSkill(
+        timeout=float(os.environ.get("SKILL_HTTP_TIMEOUT", "15")),
+    ))
+    skills.register(DnsLookupSkill())
+    skills.register(CronScheduleSkill())
+    skills.register(PingCheckSkill())
 
     agent = AgentService(
         history_store=history,
