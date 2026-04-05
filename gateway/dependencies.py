@@ -2,8 +2,11 @@ from dataclasses import dataclass
 import os
 
 from core.agent import AgentService
+
 from llm.ollama_client import OllamaChatClient
 from llm.embeddings_client import OllamaEmbeddingsClient
+from llm.openai_client import OpenAIChatClient, OpenAIEmbeddingsClient
+
 from memory.history_store import HistoryStore
 from memory.vector_store import VectorStore
 from tools.registry import ToolRegistry
@@ -31,20 +34,42 @@ class Container:
     embed: object  # OllamaEmbeddingsClient or OpenAIEmbeddingsClient
 
 
+def _build_openai_clients(default_chat_model: str):
+
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY is required when using an OpenAI-compatible provider")
+
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    chat_model = os.environ.get("OPENAI_CHAT_MODEL", default_chat_model)
+    embed_model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+    timeout = float(os.environ.get("OPENAI_TIMEOUT", "120"))
+
+    api_mode = os.environ.get("OPENAI_API_MODE", "").strip().lower()
+    if not api_mode:
+        api_mode = "responses" if "codex" in chat_model.lower() else "chat_completions"
+
+    reasoning_effort = os.environ.get("OPENAI_REASONING_EFFORT", "").strip().lower() or None
+
+    chat = OpenAIChatClient(
+        api_key=api_key,
+        model=chat_model,
+        base_url=base_url,
+        timeout=timeout,
+        api_mode=api_mode,
+        reasoning_effort=reasoning_effort,
+    )
+    embed = OpenAIEmbeddingsClient(api_key=api_key, model=embed_model, base_url=base_url, timeout=timeout)
+    return chat, embed
+
+
 def _build_llm_clients(provider: str):
     """Build chat + embeddings clients based on LLM_PROVIDER env var."""
     if provider == "openai":
-        from llm.openai_client import OpenAIChatClient, OpenAIEmbeddingsClient
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
-        base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        chat_model = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
-        embed_model = os.environ.get("OPENAI_EMBED_MODEL", "text-embedding-3-small")
-        timeout = float(os.environ.get("OPENAI_TIMEOUT", "120"))
-        chat = OpenAIChatClient(api_key=api_key, model=chat_model, base_url=base_url, timeout=timeout)
-        embed = OpenAIEmbeddingsClient(api_key=api_key, model=embed_model, base_url=base_url, timeout=timeout)
-        return chat, embed
+        return _build_openai_clients(default_chat_model="gpt-4o-mini")
+
+    if provider in ("openai-codex", "codex"):
+        return _build_openai_clients(default_chat_model="gpt-5.3-codex")
 
     # Default: ollama
     ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")

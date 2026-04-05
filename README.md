@@ -59,6 +59,19 @@ OPENAI_CHAT_MODEL=gpt-4o-mini
 OPENAI_EMBED_MODEL=text-embedding-3-small
 ```
 
+### OpenAI Codex
+
+```env
+LLM_PROVIDER=openai-codex
+OPENAI_API_KEY=sk-...
+OPENAI_CHAT_MODEL=gpt-5.3-codex
+OPENAI_EMBED_MODEL=text-embedding-3-small
+OPENAI_API_MODE=responses
+OPENAI_REASONING_EFFORT=medium
+```
+
+Codex models use the OpenAI Responses API, so this project now switches to `/responses` automatically for `openai-codex` (or whenever the configured chat model contains `codex`).
+
 You can also point `OPENAI_BASE_URL` at any OpenAI-compatible endpoint (Azure, local vLLM, LiteLLM, etc.).
 
 ---
@@ -128,7 +141,12 @@ Add to your `.env`:
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 GATEWAY_URL=http://gateway:8000
+BOT_AUTH_ENABLED=true
+BOT_ADMIN_ID=123456789
+BOT_AUTH_DB=/app/data/telegram_auth.sqlite3
 ```
+
+When auth is enabled, only `BOT_ADMIN_ID` and users added by the admin can use the bot. The admin can authorize people with `/auth_add <telegram_id>`.
 
 ### Step 3: Run
 
@@ -156,6 +174,8 @@ python -m integrations.telegram.run
 | `/ask <question>` | Explicitly ask the agent |
 | `/new` | Start a fresh session |
 | `/skills` | List available skills |
+| `/auth_add <telegram_id>` | Admin only: authorize a Telegram user |
+| `/auth_list` | Admin only: list authorized users |
 | *(any text)* | Automatically sent to the agent |
 
 Each Telegram user gets their own session (tracked by chat ID). Sessions persist across messages until `/start` or `/new`.
@@ -202,7 +222,7 @@ Dangerous commands (`rm -rf /`, `mkfs`, `shutdown`, etc.) are blocked. The agent
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PROVIDER` | `ollama` | `ollama` or `openai` |
+| `LLM_PROVIDER` | `ollama` | `ollama`, `openai`, or `openai-codex` |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `llama3:latest` | Ollama chat model |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Ollama embeddings model |
@@ -212,6 +232,8 @@ Dangerous commands (`rm -rf /`, `mkfs`, `shutdown`, etc.) are blocked. The agent
 | `OPENAI_CHAT_MODEL` | `gpt-4o-mini` | OpenAI chat model |
 | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` | OpenAI embeddings model |
 | `OPENAI_TIMEOUT` | `120` | OpenAI request timeout (seconds) |
+| `OPENAI_API_MODE` | auto | `chat_completions` or `responses`; auto-selects `responses` for Codex models |
+| `OPENAI_REASONING_EFFORT` | `medium` | Reasoning effort for Responses API capable models |
 | `AGENT_VECTOR_COLLECTION` | `memories` | ChromaDB collection name |
 | `AGENT_CONTEXT_TAIL` | `30` | Messages to include as context |
 | `AGENT_MEMORY_HITS` | `5` | Max vector search results |
@@ -220,5 +242,8 @@ Dangerous commands (`rm -rf /`, `mkfs`, `shutdown`, etc.) are blocked. The agent
 | `SKILL_HTTP_TIMEOUT` | `30` | HTTP request skill timeout |
 | `TELEGRAM_BOT_TOKEN` | - | Telegram bot token from BotFather |
 | `GATEWAY_URL` | `http://127.0.0.1:8000` | Gateway URL for Telegram bot |
+| `BOT_AUTH_ENABLED` | `false` | Enable sqlite-backed Telegram auth allowlist |
+| `BOT_ADMIN_ID` | - | Admin Telegram ID allowed to manage users |
+| `BOT_AUTH_DB` | `/app/data/telegram_auth.sqlite3` | sqlite DB for Telegram auth allowlist |
 | `BACKEND_PORT` | `8000` | Gateway exposed port |
 | `FRONTEND_PORT` | `8088` | Frontend exposed port |
