@@ -163,7 +163,7 @@ class AgentService:
             timings["llm_chat_s_total"] += llm_s
             debug_lines.append(f"[llm] chat_s={llm_s:.4f}")
 
-            self.history_store.add_message(sid, "assistant", {"raw_model_json": raw})
+            debug_lines.append(f"[llm] raw={raw[:300]}")
 
             data = _parse_json_safely(raw)
 
