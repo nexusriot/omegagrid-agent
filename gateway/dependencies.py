@@ -21,6 +21,7 @@ from skills.web_scrape import WebScrapeSkill
 from skills.dns_lookup import DnsLookupSkill
 from skills.cron_schedule import CronScheduleSkill
 from skills.ping_check import PingCheckSkill
+from skills.markdown_skill import load_markdown_skills
 
 
 @dataclass
@@ -120,6 +121,11 @@ def build_container() -> Container:
     skills.register(DnsLookupSkill())
     skills.register(CronScheduleSkill())
     skills.register(PingCheckSkill())
+
+    # Load markdown-defined skills from skills/ directory
+    skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
+    for md_skill in load_markdown_skills(skills_dir):
+        skills.register(md_skill)
 
     agent = AgentService(
         history_store=history,

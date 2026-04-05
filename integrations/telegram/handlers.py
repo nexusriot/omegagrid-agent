@@ -1,14 +1,33 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import requests
 from telegram import Update
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
+
+
+def _escape_markdown_v2(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2."""
+    return re.sub(r"([_*\[\]()~`>#+\-=|{}.!\\])", r"\\\1", text)
+
+
+async def _safe_reply(message, text: str, parse_mode=None):
+    """Send a message, falling back to plain text if Markdown parsing fails."""
+    try:
+        await message.reply_text(text, parse_mode=parse_mode)
+    except BadRequest as e:
+        if "parse entities" in str(e).lower() or "can't find end" in str(e).lower():
+            logger.warning("Markdown parse failed, retrying as plain text: %s", e)
+            await message.reply_text(text, parse_mode=None)
+        else:
+            raise
 
 # The gateway URL is set at bot startup via set_gateway_url()
 _gateway_url: str = "http://127.0.0.1:8000"
@@ -65,7 +84,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if store and store.is_enabled():
         auth_extra = f"\n\nYour Telegram ID: `{chat_id}`"
 
-    await update.message.reply_text(
+    await _safe_reply(
+        update.message,
         "Hello! I'm the OmegaGrid Agent bot.\n\n"
         "Just send me any message and I'll process it through the agent.\n\n"
         "Commands:\n"
@@ -96,7 +116,8 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         answer = result.get("answer", "(no answer)")
         model = result.get("meta", {}).get("model", "?")
         steps = result.get("meta", {}).get("step_count", "?")
-        await update.message.reply_text(
+        await _safe_reply(
+            update.message,
             f"{answer}\n\n_model: {model} | steps: {steps}_",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -126,7 +147,7 @@ async def skills_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = ["Available skills:"]
         for s in skills:
             lines.append(f"- *{s['name']}*: {s['description']}")
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+        await _safe_reply(update.message, "\n".join(lines), parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         await update.message.reply_text(f"Error listing skills: {e}")
 
@@ -170,7 +191,7 @@ async def auth_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("Authorized users:")
         for user in users:
             lines.append(f"- `{user.telegram_id}` | created={user.created_at} | last={user.last_activity}")
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    await _safe_reply(update.message, "\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

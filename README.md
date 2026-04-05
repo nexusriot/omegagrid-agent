@@ -88,8 +88,21 @@ Skills are higher-level capabilities the agent can invoke. They appear as callab
 | `datetime` | Current UTC date/time | - |
 | `http_request` | Call external HTTP APIs (GET/POST) | `SKILL_HTTP_TIMEOUT` |
 | `shell` | Execute shell commands (disabled by default) | `SKILL_SHELL_ENABLED=true` |
+| `web_scrape` | Fetch a web page and return clean text (HTML stripped) | `SKILL_HTTP_TIMEOUT` |
+| `dns_lookup` | DNS record lookup (A, AAAA, MX, TXT, CNAME, NS, SOA, PTR, SRV) | - |
+| `ping_check` | TCP reachability check with latency (host:port) | - |
+| `cron_schedule` | Parse cron expressions, explain in English, show next run times | - |
+
+### Built-in Tools
+
+| Tool | Description |
+|------|-------------|
+| `vector_add(text, meta)` | Store durable facts, decisions, or preferences in vector memory |
+| `vector_search(query, k)` | Semantic similarity search over stored memories |
 
 ### Creating a Custom Skill
+
+#### Option A: Python skill
 
 1. Create a file in `skills/`, e.g. `skills/my_skill.py`:
 
@@ -116,6 +129,47 @@ skills.register(MySkill())
 ```
 
 The agent will automatically see and use the skill.
+
+#### Option B: Markdown skill (no Python required)
+
+Create a `.md` file in the `skills/` directory. Markdown skills are loaded automatically at startup.
+
+1. Create `skills/my_skill.md`:
+
+```markdown
+---
+name: my_skill
+description: Does something useful
+endpoint: https://api.example.com/action
+method: GET
+parameters:
+  city:
+    type: string
+    description: The city to look up
+    required: true
+  format:
+    type: string
+    description: Output format (json or text)
+    required: false
+---
+
+When using this skill, always include the country name alongside the city
+for more accurate results. Prefer JSON format unless the user asks for plain text.
+```
+
+**Frontmatter fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Unique skill identifier (used as tool name in agent) |
+| `description` | yes | Short description shown to the LLM |
+| `parameters` | yes | Parameter schema (same format as Python skills) |
+| `endpoint` | no | HTTP endpoint to call (enables auto-HTTP execution) |
+| `method` | no | HTTP method: GET or POST (default GET) |
+
+**Body (below frontmatter):** Optional free-text instructions appended to the LLM system prompt when this skill is available. Use this for prompt engineering, constraints, or examples.
+
+Markdown skills without an `endpoint` act as **prompt-only skills** -- the agent sees them as capabilities and uses the body text as guidance, but execution relies on other tools (e.g. `http_request`).
 
 ### API Endpoints
 

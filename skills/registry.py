@@ -34,4 +34,9 @@ class SkillRegistry:
                 for k, p in s.parameters.items()
             )
             lines.append(f"- {s.name}({params}): {s.description}")
+            # Include body instructions from markdown skills
+            body = getattr(s, "body", "")
+            if body:
+                for bline in body.splitlines()[:5]:
+                    lines.append(f"    {bline.strip()}")
         return "\n".join(lines)

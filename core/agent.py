@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from typing import Any, Dict, List, Optional
 
 from observability.timing import Timer
 
+logger = logging.getLogger(__name__)
+
 _SYSTEM_PROMPT_TEMPLATE = """
 You are a compact tool-using agent.
 
 You have tools:
-- vector_add(text, meta={{...}})
-- vector_search(query, k=5)
+- vector_add(text, meta={{...}})  -- store a durable fact / decision / preference
+- vector_search(query, k=5)      -- semantic search over stored memories
 {skills_block}
-You may also answer directly without tool calls.
 
 You must ALWAYS output STRICT JSON, in one of the two forms:
 
@@ -26,18 +28,26 @@ A) Tool call:
   "why": "<short reason>"
 }}
 
-B) Final answer:
+B) Final answer (ONLY after you have all the information you need):
 {{
   "type": "final",
-  "answer": "<answer to the user>",
+  "answer": "<plain-text answer to the user>",
   "notes": "<optional constraints/assumptions>"
 }}
 
-Rules:
-- Never fabricate tool results.
-- Prefer vector_search when you might have relevant prior memory.
-- Use vector_add to store durable facts, decisions, preferences, or short summaries.
-- In type="final", answer MUST be a string (not an object/array).
+CRITICAL RULES:
+- You MUST use the appropriate tool to get real data. NEVER invent, guess, or
+  fabricate tool results. If you need weather, time, DNS, HTTP data etc. you
+  MUST call the corresponding tool/skill first, then give a final answer based
+  on the real tool result.
+- NEVER respond with a final answer that contains data you did not obtain from
+  a tool call or from the conversation context. If you don't have the data, call
+  the tool first.
+- Prefer vector_search BEFORE answering questions where prior memory may help.
+- Use vector_add to store durable facts, decisions, preferences, or summaries
+  the user shares with you.
+- In type="final", answer MUST be a human-readable plain-text string
+  (not raw JSON, not an object/array). Explain the result to the user naturally.
 - Keep tool args minimal and valid.
 """.strip()
 
@@ -93,11 +103,19 @@ class AgentService:
         self.history_store.add_message(sid, "user", query)
         timer.mark("sqlite_add_user_s")
 
-        memories, vtimings = self.vector_store.search_with_timings(query, k=self.memory_hits)
+        try:
+            memories, vtimings = self.vector_store.search_with_timings(query, k=self.memory_hits)
+        except Exception as e:
+            logger.error("Vector search failed: %s", e)
+            memories, vtimings = [], {}
+            debug_lines.append(f"[memory] ERROR: vector search failed: {e}")
         timings["vector_search_total_s"] = vtimings.get("vector_search_total_s", 0.0)
         timings["vector_search_embed_s"] = vtimings.get("ollama_embed_s", 0.0)
         timings["vector_search_chroma_query_s"] = vtimings.get("chroma_query_s", 0.0)
-        debug_lines.append(f"[vector] hits={len(memories)}")
+        debug_lines.append(f"[memory] initial vector search for query: {query[:120]}")
+        debug_lines.append(f"[memory] hits={len(memories)}, embed_s={vtimings.get('ollama_embed_s', 0):.4f}, chroma_s={vtimings.get('chroma_query_s', 0):.4f}")
+        for i, hit in enumerate(memories):
+            debug_lines.append(f"[memory]   #{i+1} dist={hit.get('distance', '?'):.4f} text={str(hit.get('text', ''))[:120]}")
 
         tail = self.history_store.load_tail(sid, limit=self.context_tail)
         timer.mark("sqlite_load_tail_s")
@@ -116,8 +134,12 @@ class AgentService:
             meta.setdefault("session_id", sid)
             return self.vector_store.add_text(text, meta)
 
-        def vector_search(q: str, k: int = 5) -> Dict[str, Any]:
-            return {"hits": self.vector_store.search_text(q, k=k)}
+        def vector_search(query: str = "", q: str = "", k: int = 5) -> Dict[str, Any]:
+            """Accept both 'query' and 'q' param names since the LLM may use either."""
+            search_query = query or q
+            if not search_query:
+                return {"hits": [], "error": "No query provided"}
+            return {"hits": self.vector_store.search_text(search_query, k=k)}
 
         tools = {
             "vector_add": vector_add,
@@ -166,8 +188,21 @@ class AgentService:
                     "debug_log": "\n".join(debug_lines),
                 }
 
-            if data.get("type") != "tool_call":
-                answer = f"(fallback) {raw}"
+            if data.get("type") not in ("tool_call", "final"):
+                debug_lines.append(f"[fallback] LLM returned unexpected type={data.get('type')!r}, raw={raw[:300]}")
+                # Try to extract a usable text answer from the malformed response
+                answer = data.get("answer") or data.get("text") or data.get("result") or ""
+                if not answer or not isinstance(answer, str):
+                    # Re-prompt the LLM to give a proper final answer
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({"role": "user", "content": (
+                        "Your response was not valid JSON with type='final' or type='tool_call'. "
+                        "Please respond with a proper JSON object. If you have enough information, "
+                        "use {\"type\":\"final\",\"answer\":\"your plain-text answer\"}. "
+                        "If you need data, use a tool_call."
+                    )})
+                    debug_lines.append("[fallback] re-prompting LLM for valid response")
+                    continue
                 self.history_store.add_message(sid, "assistant", answer)
                 timings.update(timer.as_dict())
                 return {
@@ -187,22 +222,35 @@ class AgentService:
             args = data.get("args", {}) or {}
             is_skill = tool in skill_names
             kind = "skill" if is_skill else "tool"
-            debug_lines.append(f"[{kind}] call={tool} args={args} reason={data.get('why', '-')}")
+            debug_lines.append(f"[{kind}] >>> CALL {tool}({json.dumps(args, ensure_ascii=False)[:200]}) reason={data.get('why', '-')}")
 
             if tool not in tools:
                 tool_result = {"error": f"Unknown tool/skill: {tool}", "available": list(tools.keys())}
-                debug_lines.append(f"[{kind}] ERROR unknown name '{tool}'")
+                debug_lines.append(f"[{kind}] ERROR unknown name '{tool}', available: {list(tools.keys())}")
             else:
                 t0 = time.perf_counter()
                 try:
                     tool_result = tools[tool](**args)
                 except Exception as e:
                     tool_result = {"error": str(e), "tool": tool, "args": args}
+                    debug_lines.append(f"[{kind}] EXCEPTION: {e}")
                 elapsed = time.perf_counter() - t0
                 timing_key = "skill_s_total" if is_skill else "tool_s_total"
                 timings.setdefault(timing_key, 0.0)
                 timings[timing_key] += elapsed
-                debug_lines.append(f"[{kind}] result={str(tool_result)[:200]} ({elapsed:.3f}s)")
+                debug_lines.append(f"[{kind}] <<< RESULT ({elapsed:.3f}s): {str(tool_result)[:300]}")
+
+                # Extended logging for vector memory operations
+                if tool == "vector_add":
+                    skipped = tool_result.get("skipped", False)
+                    reason = tool_result.get("reason", "")
+                    mid = tool_result.get("memory_id", "?")
+                    debug_lines.append(f"[memory] vector_add: id={mid}, skipped={skipped}, reason={reason}, text={str(args.get('text', ''))[:120]}")
+                elif tool == "vector_search":
+                    hits = tool_result.get("hits", [])
+                    debug_lines.append(f"[memory] vector_search: query={str(args.get('q', args.get('query', '')))[:100]}, hits={len(hits)}")
+                    for i, h in enumerate(hits):
+                        debug_lines.append(f"[memory]   #{i+1} dist={h.get('distance', '?'):.4f} text={str(h.get('text', ''))[:120]}")
 
             self.history_store.add_message(sid, "tool", tool_result)
             messages.append({"role": "assistant", "content": json.dumps(data, ensure_ascii=False)})
