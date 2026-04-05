@@ -94,7 +94,7 @@ class AgentService:
         self.context_tail = context_tail
         self.memory_hits = memory_hits
 
-    def run(self, query: str, session_id: Optional[int] = None, remember: bool = True, max_steps: int = 6) -> dict[str, Any]:
+    def run(self, query: str, session_id: Optional[int] = None, remember: bool = True, max_steps: int = 10) -> dict[str, Any]:
         timer = Timer()
         sid = session_id or self.history_store.create_session()
         debug_lines: List[str] = []
@@ -190,19 +190,10 @@ class AgentService:
 
             if data.get("type") not in ("tool_call", "final"):
                 debug_lines.append(f"[fallback] LLM returned unexpected type={data.get('type')!r}, raw={raw[:300]}")
-                # Try to extract a usable text answer from the malformed response
+                # Extract best available text from the malformed response
                 answer = data.get("answer") or data.get("text") or data.get("result") or ""
                 if not answer or not isinstance(answer, str):
-                    # Re-prompt the LLM to give a proper final answer
-                    messages.append({"role": "assistant", "content": raw})
-                    messages.append({"role": "user", "content": (
-                        "Your response was not valid JSON with type='final' or type='tool_call'. "
-                        "Please respond with a proper JSON object. If you have enough information, "
-                        "use {\"type\":\"final\",\"answer\":\"your plain-text answer\"}. "
-                        "If you need data, use a tool_call."
-                    )})
-                    debug_lines.append("[fallback] re-prompting LLM for valid response")
-                    continue
+                    answer = "I had trouble processing that request. Please try rephrasing."
                 self.history_store.add_message(sid, "assistant", answer)
                 timings.update(timer.as_dict())
                 return {

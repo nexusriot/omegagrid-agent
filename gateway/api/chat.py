@@ -14,7 +14,7 @@ class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1)
     session_id: Optional[int] = None
     remember: bool = True
-    max_steps: int = 6
+    max_steps: int = 10
 
 
 class QueryResponse(BaseModel):
