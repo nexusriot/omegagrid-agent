@@ -27,6 +27,7 @@ services:
       - AGENT_DEDUP_DISTANCE=${AGENT_DEDUP_DISTANCE}
       - SKILL_SHELL_ENABLED=${SKILL_SHELL_ENABLED:-false}
       - SKILL_HTTP_TIMEOUT=${SKILL_HTTP_TIMEOUT:-30}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
     volumes:
       - ./data:/app/data
     ports:

@@ -22,6 +22,9 @@ from skills.dns_lookup import DnsLookupSkill
 from skills.cron_schedule import CronScheduleSkill
 from skills.ping_check import PingCheckSkill
 from skills.markdown_skill import load_markdown_skills
+from skills.schedule_task import ScheduleTaskSkill
+from scheduler.store import SchedulerStore
+from scheduler.runner import SchedulerRunner
 
 
 @dataclass
@@ -33,6 +36,8 @@ class Container:
     skills: SkillRegistry
     chat: object  # OllamaChatClient or OpenAIChatClient
     embed: object  # OllamaEmbeddingsClient or OpenAIEmbeddingsClient
+    scheduler_store: SchedulerStore = None
+    scheduler_runner: SchedulerRunner = None
 
 
 def _build_openai_clients(default_chat_model: str):
@@ -127,6 +132,25 @@ def build_container() -> Container:
     for md_skill in load_markdown_skills(skills_dir):
         skills.register(md_skill)
 
+    # Scheduler
+    scheduler_db = os.path.join(data_dir, "scheduler.sqlite3")
+    scheduler_store = SchedulerStore(scheduler_db)
+    skills.register(ScheduleTaskSkill(scheduler_store))
+
+    def skill_executor(skill_name: str, args: dict):
+        s = skills.get(skill_name)
+        if not s:
+            return {"error": f"Skill '{skill_name}' not found"}
+        return s.execute(**args)
+
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    scheduler_runner = SchedulerRunner(
+        store=scheduler_store,
+        skill_executor=skill_executor,
+        bot_token=bot_token,
+        check_interval=60,
+    )
+
     agent = AgentService(
         history_store=history,
         vector_store=vector,
@@ -138,4 +162,5 @@ def build_container() -> Container:
     )
 
     return Container(agent=agent, history=history, vector=vector,
-                     tools=tools, skills=skills, chat=chat, embed=embed)
+                     tools=tools, skills=skills, chat=chat, embed=embed,
+                     scheduler_store=scheduler_store, scheduler_runner=scheduler_runner)

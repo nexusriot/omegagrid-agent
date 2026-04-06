@@ -15,6 +15,7 @@ COPY tools /app/tools
 COPY skills /app/skills
 COPY observability /app/observability
 COPY integrations /app/integrations
+COPY scheduler /app/scheduler
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000

@@ -15,6 +15,7 @@ class QueryRequest(BaseModel):
     session_id: Optional[int] = None
     remember: bool = True
     max_steps: int = 10
+    telegram_chat_id: Optional[int] = None
 
 
 class QueryResponse(BaseModel):
@@ -33,6 +34,7 @@ def query(req: QueryRequest, request: Request):
             session_id=req.session_id,
             remember=req.remember,
             max_steps=req.max_steps,
+            telegram_chat_id=req.telegram_chat_id,
         )
         return QueryResponse(**result)
     except Exception as e:
