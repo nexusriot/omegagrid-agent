@@ -61,7 +61,10 @@ async def _ensure_authorized(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def _query_agent(text: str, chat_id: int) -> dict[str, Any]:
     """Send a query to the agent gateway and return the result."""
-    payload: dict[str, Any] = {"query": text}
+    payload: dict[str, Any] = {
+        "query": text,
+        "telegram_chat_id": chat_id,
+    }
     sid = _sessions.get(chat_id)
     if sid:
         payload["session_id"] = sid

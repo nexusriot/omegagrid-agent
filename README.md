@@ -92,6 +92,7 @@ Skills are higher-level capabilities the agent can invoke. They appear as callab
 | `dns_lookup` | DNS record lookup (A, AAAA, MX, TXT, CNAME, NS, SOA, PTR, SRV) | - |
 | `ping_check` | TCP reachability check with latency (host:port) | - |
 | `cron_schedule` | Parse cron expressions, explain in English, show next run times | - |
+| `schedule_task` | Create/list/delete recurring tasks (runs skills on cron, notifies Telegram) | `TELEGRAM_BOT_TOKEN` |
 
 ### Built-in Tools
 
@@ -265,9 +266,62 @@ Dangerous commands (`rm -rf /`, `mkfs`, `shutdown`, etc.) are blocked. The agent
 
 ---
 
+## Scheduled Tasks
+
+The agent can create recurring tasks that run skills on a cron schedule and optionally push results to Telegram.
+
+### Usage via Telegram
+
+Just tell the agent what you want in natural language:
+
+```
+"every 5 minutes ping check mydomain.com and send to telegram"
+"schedule a weather check for London every hour"
+"list my scheduled tasks"
+"delete scheduled task 3"
+```
+
+The agent uses the `schedule_task` skill to create/list/delete tasks. When `notify_telegram_chat_id` is set, results are pushed to that Telegram chat automatically.
+
+### Usage via API
+
+```bash
+# Create a scheduled task
+curl -X POST http://localhost:8000/api/scheduler/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "ping mydomain.com",
+    "cron_expr": "*/5 * * * *",
+    "skill": "ping_check",
+    "args": {"host": "mydomain.com"},
+    "notify_telegram_chat_id": 11111111
+  }'
+
+# List tasks
+curl http://localhost:8000/api/scheduler/tasks
+
+# Enable/disable
+curl -X POST http://localhost:8000/api/scheduler/tasks/1/disable
+curl -X POST http://localhost:8000/api/scheduler/tasks/1/enable
+
+# Delete
+curl -X DELETE http://localhost:8000/api/scheduler/tasks/1
+```
+
+### How it works
+
+1. Tasks are stored in SQLite (`./data/scheduler.sqlite3`)
+2. A background thread in the gateway checks every 60 seconds
+3. If a task's cron expression matches the current minute, the configured skill is executed
+4. If `notify_telegram_chat_id` is set, the result is pushed to Telegram via the bot token
+5. The gateway needs `TELEGRAM_BOT_TOKEN` in its environment for push notifications
+
+---
+
 ## Data Persistence
 
 - **SQLite** (`./data/agent_memory.sqlite3`) — sessions & conversation messages
+- **SQLite** (`./data/scheduler.sqlite3`) — scheduled tasks
 - **ChromaDB** (`./data/vector_db/`) — vector embeddings for semantic memory
 
 ---

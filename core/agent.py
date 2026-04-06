@@ -48,6 +48,9 @@ CRITICAL RULES:
   the user shares with you.
 - In type="final", answer MUST be a human-readable plain-text string
   (not raw JSON, not an object/array). Explain the result to the user naturally.
+- If a tool/skill requires an argument the user has not provided (e.g. city for
+  weather, host for ping_check), do NOT guess or leave it empty. Instead, return
+  a type="final" answer asking the user to provide the missing information.
 - Keep tool args minimal and valid.
 """.strip()
 
@@ -101,7 +104,8 @@ class AgentService:
         self.context_tail = context_tail
         self.memory_hits = memory_hits
 
-    def run(self, query: str, session_id: Optional[int] = None, remember: bool = True, max_steps: int = 10) -> dict[str, Any]:
+    def run(self, query: str, session_id: Optional[int] = None, remember: bool = True,
+            max_steps: int = 10, telegram_chat_id: Optional[int] = None) -> dict[str, Any]:
         timer = Timer()
         sid = session_id or self.history_store.create_session()
         debug_lines: List[str] = []
@@ -129,9 +133,13 @@ class AgentService:
 
         system_prompt = _build_system_prompt(self.skill_registry)
 
+        context_parts = [_format_memory_hits(memories)]
+        if telegram_chat_id:
+            context_parts.append(f"Current Telegram chat_id: {telegram_chat_id} (use this for notify_telegram_chat_id when user asks for Telegram notifications)")
+
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "system", "content": _format_memory_hits(memories)},
+            {"role": "system", "content": "\n".join(context_parts)},
             *tail,
             {"role": "user", "content": query},
         ]
