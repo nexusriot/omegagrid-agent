@@ -5,3 +5,4 @@ chromadb==0.5.5
 pydantic==2.9.2
 python-telegram-bot==21.10
 openai==1.82.0
+pyyaml>=6.0
