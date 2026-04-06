@@ -277,7 +277,7 @@ The `ssh` skill executes commands on remote hosts. **Disabled by default.** Enab
 ```env
 SKILL_SSH_ENABLED=true
 SKILL_SSH_IDENTITY_FILE=/app/data/id_rsa       # optional: default SSH key
-SKILL_SSH_DEFAULT_USER=root                      # optional: default user when not specified
+SKILL_SSH_DEFAULT_USER=ubuntu                    # optional: default user when not specified
 ```
 
 Requires key-based auth (no password prompts). Mount your SSH key into the container:

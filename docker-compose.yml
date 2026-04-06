@@ -33,6 +33,7 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
     volumes:
       - ./data:/app/data
+      - ~/.ssh/id_rsa:/app/data/id_rsa:ro
     ports:
       - "${BACKEND_PORT}:8000"
 
