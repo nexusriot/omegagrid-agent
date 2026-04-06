@@ -92,7 +92,13 @@ Skills are higher-level capabilities the agent can invoke. They appear as callab
 | `dns_lookup` | DNS record lookup (A, AAAA, MX, TXT, CNAME, NS, SOA, PTR, SRV) | - |
 | `ping_check` | TCP reachability check with latency (host:port) | - |
 | `cron_schedule` | Parse cron expressions, explain in English, show next run times | - |
+| `port_scan` | Scan TCP ports on a host, returns which are open | - |
+| `http_health` | HTTP health check with status code, response time, body match | - |
+| `whois` | WHOIS lookup: registrar, expiry date, nameservers | - |
+| `base64` | Encode or decode base64 strings | - |
+| `hash` | Generate MD5/SHA1/SHA256/SHA512 hash of text | - |
 | `schedule_task` | Create/list/delete recurring tasks (runs skills on cron, notifies Telegram) | `TELEGRAM_BOT_TOKEN` |
+| `ssh` | Execute commands on remote hosts via SSH (disabled by default) | `SKILL_SSH_ENABLED=true` |
 
 ### Built-in Tools
 
@@ -264,6 +270,38 @@ Dangerous commands (`rm -rf /`, `mkfs`, `shutdown`, etc.) are blocked. The agent
 → tool_call: shell(command="df -h", timeout=10)
 ```
 
+### SSH Commands
+
+The `ssh` skill executes commands on remote hosts. **Disabled by default.** Enable with:
+
+```env
+SKILL_SSH_ENABLED=true
+SKILL_SSH_IDENTITY_FILE=/app/data/id_rsa       # optional: default SSH key
+SKILL_SSH_DEFAULT_USER=ubuntu                    # optional: default user when not specified
+```
+
+Requires key-based auth (no password prompts). Mount your SSH key into the container:
+
+```yaml
+# docker-compose.yml gateway service
+volumes:
+  - ./data:/app/data
+  - ~/.ssh/id_rsa:/app/data/id_rsa:ro
+```
+
+The agent can then run:
+
+```
+→ tool_call: ssh(host="user@server.example.com", command="uptime")
+→ tool_call: ssh(host="10.0.0.5", command="docker ps", port=2222)
+```
+
+Dangerous commands are blocked (same as shell skill). You can also use it with the scheduler:
+
+```
+"every 10 minutes ssh into web-server and check disk usage, send to telegram"
+```
+
 ---
 
 ## Scheduled Tasks
@@ -347,6 +385,9 @@ curl -X DELETE http://localhost:8000/api/scheduler/tasks/1
 | `AGENT_MEMORY_HITS` | `5` | Max vector search results |
 | `AGENT_DEDUP_DISTANCE` | `0.08` | Dedup threshold for vector memory |
 | `SKILL_SHELL_ENABLED` | `false` | Enable shell command skill |
+| `SKILL_SSH_ENABLED` | `false` | Enable SSH remote command skill |
+| `SKILL_SSH_IDENTITY_FILE` | - | Default SSH private key path |
+| `SKILL_SSH_DEFAULT_USER` | - | Default SSH username when host has no `user@` prefix |
 | `SKILL_HTTP_TIMEOUT` | `30` | HTTP request skill timeout |
 | `TELEGRAM_BOT_TOKEN` | - | Telegram bot token from BotFather |
 | `GATEWAY_URL` | `http://127.0.0.1:8000` | Gateway URL for Telegram bot |

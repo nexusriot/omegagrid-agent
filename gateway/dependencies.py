@@ -22,6 +22,12 @@ from skills.dns_lookup import DnsLookupSkill
 from skills.cron_schedule import CronScheduleSkill
 from skills.ping_check import PingCheckSkill
 from skills.markdown_skill import load_markdown_skills
+from skills.ssh_command import SshCommandSkill
+from skills.port_scan import PortScanSkill
+from skills.http_health import HttpHealthSkill
+from skills.whois_lookup import WhoisLookupSkill
+from skills.base64_skill import Base64Skill
+from skills.hash_skill import HashSkill
 from skills.schedule_task import ScheduleTaskSkill
 from scheduler.store import SchedulerStore
 from scheduler.runner import SchedulerRunner
@@ -126,6 +132,17 @@ def build_container() -> Container:
     skills.register(DnsLookupSkill())
     skills.register(CronScheduleSkill())
     skills.register(PingCheckSkill())
+    ssh_enabled = os.environ.get("SKILL_SSH_ENABLED", "false").lower() in ("true", "1", "yes")
+    skills.register(PortScanSkill())
+    skills.register(HttpHealthSkill())
+    skills.register(WhoisLookupSkill())
+    skills.register(Base64Skill())
+    skills.register(HashSkill())
+    skills.register(SshCommandSkill(
+        enabled=ssh_enabled,
+        default_identity_file=os.environ.get("SKILL_SSH_IDENTITY_FILE", ""),
+        default_user=os.environ.get("SKILL_SSH_DEFAULT_USER", ""),
+    ))
 
     # Load markdown-defined skills from skills/ directory
     skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
