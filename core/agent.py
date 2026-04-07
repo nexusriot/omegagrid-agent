@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 from observability.timing import Timer
 
@@ -277,4 +277,147 @@ class AgentService:
             },
             "memories": memories,
             "debug_log": "\n".join(debug_lines),
+        }
+
+    def run_stream(
+        self,
+        query: str,
+        session_id: Optional[int] = None,
+        remember: bool = True,
+        max_steps: int = 10,
+        telegram_chat_id: Optional[int] = None,
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Same logic as run() but yields events incrementally.
+
+        Event types:
+          {"event": "thinking",    "step": N}
+          {"event": "tool_call",   "step": N, "tool": "...", "args": {...}, "why": "..."}
+          {"event": "tool_result", "step": N, "tool": "...", "result": "...", "elapsed_s": ...}
+          {"event": "final",       "session_id": ..., "answer": "...", "meta": {...}}
+          {"event": "error",       "error": "..."}
+        """
+        timer = Timer()
+        sid = session_id or self.history_store.create_session()
+        timings: Dict[str, float] = {}
+
+        self.history_store.add_message(sid, "user", query)
+        timer.mark("sqlite_add_user_s")
+
+        try:
+            memories, vtimings = self.vector_store.search_with_timings(query, k=self.memory_hits)
+        except Exception as e:
+            logger.error("Vector search failed: %s", e)
+            memories, vtimings = [], {}
+        timings["vector_search_total_s"] = vtimings.get("vector_search_total_s", 0.0)
+
+        tail = self.history_store.load_tail(sid, limit=self.context_tail)
+        system_prompt = _build_system_prompt(self.skill_registry)
+
+        context_parts = [_format_memory_hits(memories)]
+        if telegram_chat_id:
+            context_parts.append(
+                f"Current Telegram chat_id: {telegram_chat_id} "
+                "(use this for notify_telegram_chat_id when user asks for Telegram notifications)"
+            )
+
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": "\n".join(context_parts)},
+            *tail,
+            {"role": "user", "content": query},
+        ]
+
+        def vector_add(text: str, meta: Dict[str, Any] | None = None) -> Dict[str, Any]:
+            meta = dict(meta or {})
+            meta.setdefault("session_id", sid)
+            return self.vector_store.add_text(text, meta)
+
+        def vector_search(query: str = "", q: str = "", k: int = 5) -> Dict[str, Any]:
+            search_query = query or q
+            if not search_query:
+                return {"hits": [], "error": "No query provided"}
+            return {"hits": self.vector_store.search_text(search_query, k=k)}
+
+        tools = {"vector_add": vector_add, "vector_search": vector_search}
+        skill_names: List[str] = []
+        if self.skill_registry:
+            for skill_name in self.skill_registry.list_names():
+                skill = self.skill_registry.get(skill_name)
+                tools[skill_name] = lambda _s=skill, **kw: _s.execute(**kw)
+                skill_names.append(skill_name)
+
+        for step in range(1, max_steps + 1):
+            yield {"event": "thinking", "step": step}
+
+            raw, llm_s = self.chat_client.complete_json(messages)
+            timings.setdefault("llm_chat_s_total", 0.0)
+            timings["llm_chat_s_total"] += llm_s
+
+            try:
+                data = _parse_json_safely(raw)
+            except Exception as exc:
+                logger.error("JSON parse error step %d: %s", step, exc)
+                yield {"event": "error", "error": str(exc)}
+                return
+
+            if data.get("type") == "final":
+                raw_answer = data.get("answer", "")
+                answer = raw_answer if isinstance(raw_answer, str) else json.dumps(raw_answer, ensure_ascii=False, indent=2)
+                self.history_store.add_message(sid, "assistant", answer)
+                timings.update(timer.as_dict())
+                yield {
+                    "event": "final",
+                    "session_id": sid,
+                    "answer": answer,
+                    "meta": {"timings": timings, "step_count": step, "model": self.chat_client.model},
+                }
+                return
+
+            if data.get("type") not in ("tool_call", "final"):
+                answer = data.get("answer") or data.get("text") or data.get("result") or ""
+                if not answer or not isinstance(answer, str):
+                    answer = "I had trouble processing that request. Please try rephrasing."
+                self.history_store.add_message(sid, "assistant", answer)
+                timings.update(timer.as_dict())
+                yield {
+                    "event": "final",
+                    "session_id": sid,
+                    "answer": answer,
+                    "meta": {"timings": timings, "step_count": step, "fallback": True, "model": self.chat_client.model},
+                }
+                return
+
+            tool_name = data.get("tool")
+            args = data.get("args", {}) or {}
+            yield {"event": "tool_call", "step": step, "tool": tool_name, "args": args, "why": data.get("why", "")}
+
+            if tool_name not in tools:
+                tool_result = {"error": f"Unknown tool/skill: {tool_name}", "available": list(tools.keys())}
+            else:
+                t0 = time.perf_counter()
+                try:
+                    tool_result = tools[tool_name](**args)
+                except Exception as e:
+                    tool_result = {"error": str(e), "tool": tool_name, "args": args}
+                elapsed = time.perf_counter() - t0
+                timing_key = "skill_s_total" if tool_name in skill_names else "tool_s_total"
+                timings.setdefault(timing_key, 0.0)
+                timings[timing_key] += elapsed
+
+            result_preview = str(tool_result)[:300]
+            yield {"event": "tool_result", "step": step, "tool": tool_name, "result": result_preview, "elapsed_s": round(elapsed if tool_name in tools else 0, 3)}
+
+            self.history_store.add_message(sid, "tool", tool_result)
+            messages.append({"role": "assistant", "content": json.dumps(data, ensure_ascii=False)})
+            messages.append({"role": "tool", "content": json.dumps(tool_result, ensure_ascii=False)})
+            messages.append({"role": "user", "content": "Continue using the tool result."})
+
+        answer = "I could not finish within max_steps. Please refine the goal or increase max_steps."
+        self.history_store.add_message(sid, "assistant", answer)
+        timings.update(timer.as_dict())
+        yield {
+            "event": "final",
+            "session_id": sid,
+            "answer": answer,
+            "meta": {"timings": timings, "step_count": max_steps, "max_steps_hit": True, "model": self.chat_client.model},
         }
