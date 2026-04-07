@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
+import time
 from typing import Any
 
 import requests
 from telegram import Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TimedOut, RetryAfter
 from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,130 @@ def _query_agent(text: str, chat_id: int) -> dict[str, Any]:
     return data
 
 
+_EDIT_INTERVAL_S = 1.5
+
+# Status emoji mapping
+_STEP_ICONS = {
+    "thinking": "\u2699\ufe0f",     # gear
+    "tool_call": "\ud83d\udee0\ufe0f",  # wrench
+    "tool_result": "\u2705",          # check
+}
+
+
+def _render_status(events: list[dict]) -> str:
+    """Build a compact multi-line status text from accumulated events."""
+    lines: list[str] = []
+    for ev in events:
+        t = ev.get("event")
+        if t == "thinking":
+            lines.append(f"{_STEP_ICONS['thinking']} Thinking (step {ev.get('step', '?')})...")
+        elif t == "tool_call":
+            tool = ev.get("tool", "?")
+            why = ev.get("why", "")
+            brief = f" — {why}" if why else ""
+            lines.append(f"{_STEP_ICONS['tool_call']} Calling {tool}{brief}")
+        elif t == "tool_result":
+            tool = ev.get("tool", "?")
+            elapsed = ev.get("elapsed_s", 0)
+            lines.append(f"{_STEP_ICONS['tool_result']} {tool} done ({elapsed:.1f}s)")
+    return "\n".join(lines) if lines else "Processing..."
+
+
+async def _safe_edit(message, text: str):
+    """Edit a message, ignoring common transient errors."""
+    try:
+        await message.edit_text(text)
+    except BadRequest as e:
+        if "message is not modified" in str(e).lower():
+            pass  # identical text, ignore
+        else:
+            logger.warning("edit_text BadRequest: %s", e)
+    except (TimedOut, RetryAfter):
+        pass  # transient, skip this edit cycle
+    except Exception:
+        logger.debug("edit_text failed", exc_info=True)
+
+
+async def _stream_to_message(message, text: str, chat_id: int):
+    """Consume SSE from /api/query/stream and progressively edit *message*."""
+    payload: dict[str, Any] = {
+        "query": text,
+        "telegram_chat_id": chat_id,
+    }
+    sid = _sessions.get(chat_id)
+    if sid:
+        payload["session_id"] = sid
+
+    accumulated: list[dict] = []
+    last_edit = 0.0
+    final_answer: str | None = None
+    final_meta: dict = {}
+
+    try:
+        resp = requests.post(
+            f"{_gateway_url}/api/query/stream",
+            json=payload,
+            stream=True,
+            timeout=300,
+        )
+        resp.raise_for_status()
+
+        event_type = ""
+        data_buf = ""
+        for raw_line in resp.iter_lines(decode_unicode=True):
+            if raw_line is None:
+                continue
+            line = raw_line  # already decoded
+            if line.startswith("event:"):
+                event_type = line[len("event:"):].strip()
+                continue
+            if line.startswith("data:"):
+                data_buf = line[len("data:"):].strip()
+                # Process complete event
+                try:
+                    ev = json.loads(data_buf)
+                except json.JSONDecodeError:
+                    continue
+
+                ev_type = ev.get("event", event_type)
+
+                if ev_type == "final":
+                    final_answer = ev.get("answer", "(no answer)")
+                    final_meta = ev.get("meta", {})
+                    _sessions[chat_id] = ev.get("session_id")
+                    break
+                elif ev_type == "error":
+                    final_answer = f"Error: {ev.get('error', 'unknown')}"
+                    break
+
+                # Intermediate event — accumulate and edit
+                accumulated.append(ev)
+                now = time.monotonic()
+                if now - last_edit >= _EDIT_INTERVAL_S:
+                    status_text = _render_status(accumulated)
+                    await _safe_edit(message, status_text)
+                    last_edit = now
+                    # yield back to event loop
+                    await asyncio.sleep(0)
+
+                data_buf = ""
+                event_type = ""
+                continue
+            # empty line = end of event (already handled above)
+
+    except requests.RequestException as e:
+        logger.exception("Stream request failed, falling back to sync")
+        # Fallback to non-streaming
+        try:
+            result = _query_agent(text, chat_id)
+            final_answer = result.get("answer", "(no answer)")
+            final_meta = result.get("meta", {})
+        except Exception as e2:
+            final_answer = f"Error: {e2}"
+
+    return final_answer, final_meta
+
+
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     _sessions.pop(chat_id, None)
@@ -113,20 +240,19 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chat_id = update.effective_chat.id
-    await update.message.reply_text("Thinking...")
+    status_msg = await update.message.reply_text("\u2699\ufe0f Processing...")
     try:
-        result = _query_agent(text, chat_id)
-        answer = result.get("answer", "(no answer)")
-        model = result.get("meta", {}).get("model", "?")
-        steps = result.get("meta", {}).get("step_count", "?")
-        await _safe_reply(
-            update.message,
-            f"{answer}\n\n_model: {model} | steps: {steps}_",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        answer, meta = await _stream_to_message(status_msg, text, chat_id)
+        model = meta.get("model", "?")
+        steps = meta.get("step_count", "?")
+        final_text = f"{answer}\n\n_model: {model} | steps: {steps}_"
+        try:
+            await status_msg.edit_text(final_text, parse_mode=ParseMode.MARKDOWN)
+        except BadRequest:
+            await status_msg.edit_text(final_text)
     except Exception as e:
         logger.exception("Agent query failed")
-        await update.message.reply_text(f"Error: {e}")
+        await _safe_edit(status_msg, f"Error: {e}")
 
 
 async def new_session_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -198,7 +324,7 @@ async def auth_list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle plain text messages - route them to the agent."""
+    """Handle plain text messages - route them to the agent with streaming."""
     if not await _ensure_authorized(update, context):
         return
 
@@ -207,10 +333,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chat_id = update.effective_chat.id
+    status_msg = await update.message.reply_text("\u2699\ufe0f Processing...")
     try:
-        result = _query_agent(text, chat_id)
-        answer = result.get("answer", "(no answer)")
-        await update.message.reply_text(answer)
+        answer, meta = await _stream_to_message(status_msg, text, chat_id)
+        try:
+            await status_msg.edit_text(answer, parse_mode=ParseMode.MARKDOWN)
+        except BadRequest:
+            await status_msg.edit_text(answer)
     except Exception as e:
         logger.exception("Agent query failed")
-        await update.message.reply_text(f"Error: {e}")
+        await _safe_edit(status_msg, f"Error: {e}")
