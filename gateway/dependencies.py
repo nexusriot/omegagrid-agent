@@ -29,6 +29,7 @@ from skills.whois_lookup import WhoisLookupSkill
 from skills.base64_skill import Base64Skill
 from skills.hash_skill import HashSkill
 from skills.schedule_task import ScheduleTaskSkill
+from skills.skill_creator import SkillCreatorSkill
 from scheduler.store import SchedulerStore
 from scheduler.runner import SchedulerRunner
 
@@ -148,6 +149,9 @@ def build_container() -> Container:
     skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
     for md_skill in load_markdown_skills(skills_dir):
         skills.register(md_skill)
+
+    # Skill creator — lets the agent build new skills at runtime
+    skills.register(SkillCreatorSkill(skills_dir=skills_dir, skill_registry=skills))
 
     # Scheduler
     scheduler_db = os.path.join(data_dir, "scheduler.sqlite3")

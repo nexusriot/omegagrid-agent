@@ -14,6 +14,9 @@ class SkillRegistry:
     def register(self, skill: BaseSkill):
         self._skills[skill.name] = skill
 
+    def unregister(self, name: str) -> bool:
+        return self._skills.pop(name, None) is not None
+
     def get(self, name: str) -> BaseSkill | None:
         return self._skills.get(name)
 
