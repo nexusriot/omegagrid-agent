@@ -111,6 +111,18 @@ class SkillCreatorSkill(BaseSkill):
             except Exception:
                 return {"error": "parameters_schema must be a valid JSON object."}
 
+        # Normalize flat schemas like {"city": "string"} into proper format
+        if isinstance(params_schema, dict):
+            normalized = {}
+            for pk, pv in params_schema.items():
+                if isinstance(pv, str):
+                    normalized[pk] = {"type": pv, "description": pk, "required": False}
+                elif isinstance(pv, dict):
+                    normalized[pk] = pv
+                else:
+                    normalized[pk] = {"type": "string", "description": str(pv), "required": False}
+            params_schema = normalized
+
         endpoint = (kw.get("endpoint") or "").strip()
         method = (kw.get("method") or "GET").strip().upper()
         instructions = (kw.get("instructions") or "").strip()

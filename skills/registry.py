@@ -33,8 +33,10 @@ class SkillRegistry:
         lines = []
         for s in self._skills.values():
             params = ", ".join(
-                f"{k}" + (f" (required)" if p.get("required") else " (optional)")
-                for k, p in s.parameters.items()
+                f"{k}" + (
+                    f" (required)" if (isinstance(p, dict) and p.get("required")) else " (optional)"
+                )
+                for k, p in (s.parameters or {}).items()
             )
             lines.append(f"- {s.name}({params}): {s.description}")
             # Include body instructions from markdown skills
