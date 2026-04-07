@@ -14,6 +14,9 @@ class SkillRegistry:
     def register(self, skill: BaseSkill):
         self._skills[skill.name] = skill
 
+    def unregister(self, name: str) -> bool:
+        return self._skills.pop(name, None) is not None
+
     def get(self, name: str) -> BaseSkill | None:
         return self._skills.get(name)
 
@@ -30,8 +33,10 @@ class SkillRegistry:
         lines = []
         for s in self._skills.values():
             params = ", ".join(
-                f"{k}" + (f" (required)" if p.get("required") else " (optional)")
-                for k, p in s.parameters.items()
+                f"{k}" + (
+                    f" (required)" if (isinstance(p, dict) and p.get("required")) else " (optional)"
+                )
+                for k, p in (s.parameters or {}).items()
             )
             lines.append(f"- {s.name}({params}): {s.description}")
             # Include body instructions from markdown skills

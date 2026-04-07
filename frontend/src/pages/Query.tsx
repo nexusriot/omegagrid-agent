@@ -6,10 +6,10 @@ type Session = { id: number; created_at: number; message_count: number };
 export default function Query() {
   const examples = useMemo(
     () => [
-      "Remember that my preferred language is Russian.",
-      "Summarize what you know about me from memory.",
+      "Remember you is my programming assistant",
+      "Remember I'm using Linux Mint",
       "Store a short summary of this project in memory.",
-      "I have Ollama locally. Build me a plan for an agent with vector memory.",
+      "Summarize what you know about me from memory.",
     ],
     []
   );

@@ -52,6 +52,13 @@ CRITICAL RULES:
   weather, host for ping_check), do NOT guess or leave it empty. Instead, return
   a type="final" answer asking the user to provide the missing information.
 - Keep tool args minimal and valid.
+- SELF-EXTENSION: If the user asks for a capability that NO existing skill covers
+  (e.g. "check SSL cert", "convert currency"), use skill_creator to create a new
+  skill first, then call it. Steps:
+  1. Call skill_creator(action="create", name=..., description=...,
+     parameters_schema=..., endpoint=... or instructions=...).
+  2. The new skill is immediately available — call it in the next step.
+  Do NOT create a skill if an existing one already handles the request.
 """.strip()
 
 

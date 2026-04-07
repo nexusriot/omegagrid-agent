@@ -99,6 +99,7 @@ Skills are higher-level capabilities the agent can invoke. They appear as callab
 | `hash` | Generate MD5/SHA1/SHA256/SHA512 hash of text | - |
 | `schedule_task` | Create/list/delete recurring tasks (runs skills on cron, notifies Telegram) | `TELEGRAM_BOT_TOKEN` |
 | `ssh` | Execute commands on remote hosts via SSH (disabled by default) | `SKILL_SSH_ENABLED=true` |
+| `skill_creator` | Create/list/delete skills at runtime (agent self-extends) | - |
 
 ### Built-in Tools
 
@@ -177,6 +178,14 @@ for more accurate results. Prefer JSON format unless the user asks for plain tex
 **Body (below frontmatter):** Optional free-text instructions appended to the LLM system prompt when this skill is available. Use this for prompt engineering, constraints, or examples.
 
 Markdown skills without an `endpoint` act as **prompt-only skills** -- the agent sees them as capabilities and uses the body text as guidance, but execution relies on other tools (e.g. `http_request`).
+
+#### Option C: Agent-created skills (runtime)
+
+The agent can create new markdown skills on its own via the `skill_creator` tool. Just ask it:
+
+> "Create a skill that checks SSL certificate expiry for a given domain"
+
+The agent will generate the `.md` file, register it immediately, and the new skill is usable in the same conversation. You can also ask the agent to list or delete dynamic skills.
 
 ### API Endpoints
 
