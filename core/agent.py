@@ -54,10 +54,15 @@ CRITICAL RULES:
 - Keep tool args minimal and valid.
 - SELF-EXTENSION: If the user asks for a capability that NO existing skill covers
   (e.g. "check SSL cert", "convert currency"), use skill_creator to create a new
-  skill first, then call it. Steps:
-  1. Call skill_creator(action="create", name=..., description=...,
-     parameters_schema=..., endpoint=... or instructions=...).
-  2. The new skill is immediately available — call it in the next step.
+  skill first, then call it.
+  - Single-endpoint skill: pass endpoint=... and method=...
+  - Multi-step pipeline skill: pass steps=[...] with a list of step objects.
+    Each step has: name, endpoint, method.  Use {{{{param}}}} for input params and
+    {{{{step_name.json.path}}}} to reference a previous step's JSON response.
+    Example steps: [{{"name":"get_date","endpoint":"https://api.example.com/now"}},
+    {{"name":"check","endpoint":"https://api.example.com/lookup?d={{{{get_date.date}}}}"}}]
+  - Prompt-only skill: omit both endpoint and steps, pass instructions=...
+  After creating, the new skill is immediately callable in the next step.
   Do NOT create a skill if an existing one already handles the request.
 """.strip()
 

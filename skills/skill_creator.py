@@ -68,6 +68,19 @@ class SkillCreatorSkill(BaseSkill):
             "description": "Free-text body / instructions appended after the YAML frontmatter.",
             "required": False,
         },
+        "steps": {
+            "type": "array",
+            "description": (
+                "For multi-step pipeline skills.  A list of step objects, each with: "
+                "name (required), endpoint (required), method (GET/POST, default GET), "
+                "headers (optional dict), params (optional dict), body (optional dict).  "
+                "Use {{param}} for skill input params and {{step_name.path}} to reference "
+                "previous step results.  Example: "
+                '[{"name":"get_date","endpoint":"https://api.example.com/date","method":"GET"},'
+                '{"name":"get_events","endpoint":"https://api.example.com/events?date={{get_date.date}}","method":"GET"}]'
+            ),
+            "required": False,
+        },
     }
 
     def __init__(self, skills_dir: str, skill_registry):
@@ -127,6 +140,17 @@ class SkillCreatorSkill(BaseSkill):
         method = (kw.get("method") or "GET").strip().upper()
         instructions = (kw.get("instructions") or "").strip()
 
+        # Pipeline steps
+        steps = kw.get("steps") or []
+        if isinstance(steps, str):
+            import json as _json
+            try:
+                steps = _json.loads(steps)
+            except Exception:
+                return {"error": "steps must be a valid JSON array."}
+        if not isinstance(steps, list):
+            steps = []
+
         # Build YAML frontmatter dict
         meta: Dict[str, Any] = {
             "name": name,
@@ -134,7 +158,9 @@ class SkillCreatorSkill(BaseSkill):
         }
         if params_schema:
             meta["parameters"] = params_schema
-        if endpoint:
+        if steps:
+            meta["steps"] = steps
+        elif endpoint:
             meta["endpoint"] = endpoint
             meta["method"] = method
 
@@ -157,12 +183,16 @@ class SkillCreatorSkill(BaseSkill):
         skill = MarkdownSkill(meta=meta, body=instructions)
         self._registry.register(skill)
 
-        logger.info("skill_creator: %s skill '%s' -> %s", "updated" if overwrite else "created", name, fpath)
+        skill_type = "pipeline" if steps else ("endpoint" if endpoint else "prompt-only")
+        logger.info("skill_creator: %s %s skill '%s' -> %s",
+                     "updated" if overwrite else "created", skill_type, name, fpath)
         return {
             "status": "updated" if overwrite else "created",
             "skill_name": name,
             "file": fpath,
             "description": description,
+            "type": skill_type,
+            "steps_count": len(steps) if steps else 0,
             "has_endpoint": bool(endpoint),
             "parameters": list(params_schema.keys()) if params_schema else [],
             "hint": f"Skill '{name}' is now registered and can be called immediately.",
