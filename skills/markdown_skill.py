@@ -118,6 +118,7 @@ class MarkdownSkill(BaseSkill):
             headers = {"User-Agent": "OmegaGridAgent/1.0"}
             headers.update(extra_headers)
 
+            r = None
             try:
                 if method == "POST":
                     headers["Content-Type"] = "application/json"
@@ -138,11 +139,12 @@ class MarkdownSkill(BaseSkill):
                 parsed = {"error": str(e)}
 
             ctx[step_name] = parsed
+            status_code = r.status_code if r is not None else None
             # Truncate large responses in the result summary
             preview = json.dumps(parsed, ensure_ascii=False, default=str)
             if len(preview) > 2000:
                 preview = preview[:2000] + "...(truncated)"
-            results.append({"step": step_name, "status": getattr(r, "status_code", None), "body": parsed})
+            results.append({"step": step_name, "status": status_code, "body": parsed})
             logger.debug("pipeline %s step %s: %s", self.name, step_name, preview[:200])
 
         return {
