@@ -54,10 +54,15 @@ CRITICAL RULES:
 - Keep tool args minimal and valid.
 - SELF-EXTENSION: If the user asks for a capability that NO existing skill covers
   (e.g. "check SSL cert", "convert currency"), use skill_creator to create a new
-  skill first, then call it. Steps:
-  1. Call skill_creator(action="create", name=..., description=...,
-     parameters_schema=..., endpoint=... or instructions=...).
-  2. The new skill is immediately available — call it in the next step.
+  skill first, then call it.
+  - Single-endpoint skill: pass endpoint=... and method=...
+  - Multi-step pipeline skill: pass steps=[...] with a list of step objects.
+    Each step has: name, endpoint, method.  Use {{{{param}}}} for input params and
+    {{{{step_name.json.path}}}} to reference a previous step's JSON response.
+    Example steps: [{{"name":"get_date","endpoint":"https://api.example.com/now"}},
+    {{"name":"check","endpoint":"https://api.example.com/lookup?d={{{{get_date.date}}}}"}}]
+  - Prompt-only skill: omit both endpoint and steps, pass instructions=...
+  After creating, the new skill is immediately callable in the next step.
   Do NOT create a skill if an existing one already handles the request.
 """.strip()
 
@@ -85,6 +90,34 @@ def _parse_json_safely(text: str) -> Dict[str, Any]:
         inner = data["raw_model_json"]
         if isinstance(inner, str):
             data = json.loads(inner)
+    return data
+
+
+def _normalize_tool_call(data: Dict[str, Any], tools: Dict[str, Any]) -> Dict[str, Any]:
+    """Fix malformed LLM responses where 'type' is a tool/skill name instead of 'tool_call'.
+
+    Example input:  {"type": "skill_creator", "action": "create", "name": "..."}
+    Corrected to:   {"type": "tool_call", "tool": "skill_creator",
+                      "args": {"action": "create", "name": "..."}}
+    """
+    resp_type = data.get("type", "")
+    if resp_type in ("tool_call", "final"):
+        return data
+
+    # Check if "type" value matches a known tool name
+    if resp_type in tools:
+        args = {k: v for k, v in data.items() if k not in ("type", "why")}
+        logger.info("auto-recover: rewrote type=%r -> tool_call(tool=%r)", resp_type, resp_type)
+        return {"type": "tool_call", "tool": resp_type, "args": args, "why": data.get("why", "auto-recovered")}
+
+    # Check if "tool" field is present but "type" is wrong/missing
+    if "tool" in data and data["tool"] in tools:
+        logger.info("auto-recover: added type=tool_call for tool=%r", data["tool"])
+        data["type"] = "tool_call"
+        if "args" not in data:
+            data["args"] = {k: v for k, v in data.items() if k not in ("type", "tool", "why")}
+        return data
+
     return data
 
 
@@ -188,6 +221,10 @@ class AgentService:
             debug_lines.append(f"[llm] raw={raw[:300]}")
 
             data = _parse_json_safely(raw)
+
+            # Auto-recover: LLM sometimes puts the tool name in "type"
+            # instead of using {"type":"tool_call","tool":"..."}.
+            data = _normalize_tool_call(data, tools)
 
             if data.get("type") == "final":
                 raw_answer = data.get("answer", "")
@@ -366,6 +403,8 @@ class AgentService:
                 logger.error("JSON parse error step %d: %s", step, exc)
                 yield {"event": "error", "error": str(exc)}
                 return
+
+            data = _normalize_tool_call(data, tools)
 
             if data.get("type") == "final":
                 raw_answer = data.get("answer", "")
