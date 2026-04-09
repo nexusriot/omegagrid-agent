@@ -143,6 +143,7 @@ def build_container() -> Container:
         enabled=ssh_enabled,
         default_identity_file=os.environ.get("SKILL_SSH_IDENTITY_FILE", ""),
         default_user=os.environ.get("SKILL_SSH_DEFAULT_USER", ""),
+        private_key_content=os.environ.get("SKILL_SSH_PRIVATE_KEY", ""),
     ))
 
     # Load markdown-defined skills from skills/ directory
