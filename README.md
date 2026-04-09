@@ -285,11 +285,16 @@ The `ssh` skill executes commands on remote hosts. **Disabled by default.** Enab
 
 ```env
 SKILL_SSH_ENABLED=true
-SKILL_SSH_IDENTITY_FILE=/app/data/id_rsa       # optional: default SSH key
-SKILL_SSH_DEFAULT_USER=ubuntu                    # optional: default user when not specified
+SKILL_SSH_DEFAULT_USER=ubuntu                  # optional: fallback user when prompt doesn't supply one
 ```
 
-Requires key-based auth (no password prompts). Mount your SSH key into the container:
+Requires key-based auth (no password prompts).  You can supply the private key in **either** of two ways:
+
+**A) Mount a key file into the container:**
+
+```env
+SKILL_SSH_IDENTITY_FILE=/app/data/id_rsa
+```
 
 ```yaml
 # docker-compose.yml gateway service
@@ -298,11 +303,29 @@ volumes:
   - ~/.ssh/id_rsa:/app/data/id_rsa:ro
 ```
 
+**B) Inline the key in `.env`** (no host file needed):
+
+```env
+# Newlines escaped on a single line
+SKILL_SSH_PRIVATE_KEY="-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blb...\n-----END OPENSSH PRIVATE KEY-----"
+
+# OR base64-encoded blob (one line, no headers required)
+SKILL_SSH_PRIVATE_KEY=LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZ...
+```
+
+On startup the gateway materializes the inline key to a `chmod 600` temp file and uses it for SSH.  If both `SKILL_SSH_IDENTITY_FILE` and `SKILL_SSH_PRIVATE_KEY` are set, the file path wins.
+
+**Username resolution priority** (highest first):
+1. `user@` prefix already inside the `host` argument from the prompt
+2. Explicit `user` parameter from the prompt
+3. `SKILL_SSH_DEFAULT_USER` from `.env`
+
 The agent can then run:
 
 ```
 → tool_call: ssh(host="user@server.example.com", command="uptime")
-→ tool_call: ssh(host="10.0.0.5", command="docker ps", port=2222)
+→ tool_call: ssh(host="10.0.0.5", user="alice", command="docker ps", port=2222)
+→ tool_call: ssh(host="10.0.0.5", command="uname -a")   # uses default user from .env
 ```
 
 Dangerous commands are blocked (same as shell skill). You can also use it with the scheduler:
@@ -395,8 +418,9 @@ curl -X DELETE http://localhost:8000/api/scheduler/tasks/1
 | `AGENT_DEDUP_DISTANCE` | `0.08` | Dedup threshold for vector memory |
 | `SKILL_SHELL_ENABLED` | `false` | Enable shell command skill |
 | `SKILL_SSH_ENABLED` | `false` | Enable SSH remote command skill |
-| `SKILL_SSH_IDENTITY_FILE` | - | Default SSH private key path |
-| `SKILL_SSH_DEFAULT_USER` | - | Default SSH username when host has no `user@` prefix |
+| `SKILL_SSH_IDENTITY_FILE` | - | Path to SSH private key file (takes priority over `SKILL_SSH_PRIVATE_KEY`) |
+| `SKILL_SSH_PRIVATE_KEY` | - | Inline SSH private key (PEM with `\n` escapes, or base64-encoded blob) |
+| `SKILL_SSH_DEFAULT_USER` | - | Fallback SSH username; prompt-supplied user always wins |
 | `SKILL_HTTP_TIMEOUT` | `30` | HTTP request skill timeout |
 | `TELEGRAM_BOT_TOKEN` | - | Telegram bot token from BotFather |
 | `GATEWAY_URL` | `http://127.0.0.1:8000` | Gateway URL for Telegram bot |
