@@ -12,21 +12,22 @@ parameters:
     required: false
 steps:
   - name: get_date
-    endpoint: https://aisenseapi.com/services/v1/datetime
-    method: GET
+    skill: datetime
   - name: get_holidays
     endpoint: https://www.gov.uk/bank-holidays.json
     method: GET
 ---
 
-After fetching the results from both steps:
+Step results:
+- `get_date` returns {date, time, day_of_week, iso, unix_timestamp} from the local datetime skill.
+- `get_holidays` returns the UK bank holidays JSON keyed by region.
 
-1. Use the `date` parameter if provided, otherwise extract today's date from the
-   get_date step result (look for a date field in ISO format, use YYYY-MM-DD).
-2. From the get_holidays step result, look up the region key (default
-   "england-and-wales"). The structure is:
-   `{"england-and-wales": {"events": [{"date": "YYYY-MM-DD", "title": "..."}]}}`.
-3. Check if the target date appears in that region's events list.
+Logic:
+1. Use the user-supplied `date` parameter if present, otherwise use `get_date.date`
+   (already in YYYY-MM-DD format).
+2. From `get_holidays`, look up the region key (default `england-and-wales`).
+   Structure: `{"england-and-wales": {"events": [{"date": "YYYY-MM-DD", "title": "..."}]}}`.
+3. Check whether the target date appears in that region's `events` list.
 4. Report clearly:
    - Whether the date is a bank holiday.
    - If yes, which holiday it is (title).

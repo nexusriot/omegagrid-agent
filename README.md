@@ -97,6 +97,12 @@ Skills are higher-level capabilities the agent can invoke. They appear as callab
 | `whois` | WHOIS lookup: registrar, expiry date, nameservers | - |
 | `base64` | Encode or decode base64 strings | - |
 | `hash` | Generate MD5/SHA1/SHA256/SHA512 hash of text | - |
+| `math_eval` | Safely evaluate math expressions (AST-based, no `eval()`) — supports trig, log, sqrt, factorial, etc. | - |
+| `ip_info` | Geolocation + ASN/ISP/reverse-DNS lookup for an IP via ip-api.com (no key) | - |
+| `uuid_gen` | Generate UUIDs (v1, v3, v4, v5) with optional namespace+name | - |
+| `password_gen` | Generate cryptographically secure passwords (configurable length & classes) | - |
+| `qr_generate` | Generate a QR code as a base64-encoded PNG (URL/text → image) | - |
+| `cidr_calc` | CIDR network calculator (netmask, hosts, range, IP membership check) | - |
 | `schedule_task` | Create/list/delete recurring tasks (runs skills on cron, notifies Telegram) | `TELEGRAM_BOT_TOKEN` |
 | `ssh` | Execute commands on remote hosts via SSH (disabled by default) | `SKILL_SSH_ENABLED=true` |
 | `skill_creator` | Create/list/delete skills at runtime (agent self-extends) | - |

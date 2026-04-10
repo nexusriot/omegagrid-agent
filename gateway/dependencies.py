@@ -30,6 +30,12 @@ from skills.base64_skill import Base64Skill
 from skills.hash_skill import HashSkill
 from skills.schedule_task import ScheduleTaskSkill
 from skills.skill_creator import SkillCreatorSkill
+from skills.math_eval import MathEvalSkill
+from skills.ip_info import IpInfoSkill
+from skills.uuid_gen import UuidGenSkill
+from skills.password_gen import PasswordGenSkill
+from skills.qr_generate import QrGenerateSkill
+from skills.cidr_calc import CidrCalcSkill
 from scheduler.store import SchedulerStore
 from scheduler.runner import SchedulerRunner
 
@@ -139,6 +145,14 @@ def build_container() -> Container:
     skills.register(WhoisLookupSkill())
     skills.register(Base64Skill())
     skills.register(HashSkill())
+    skills.register(MathEvalSkill())
+    skills.register(IpInfoSkill(
+        timeout=float(os.environ.get("SKILL_HTTP_TIMEOUT", "10")),
+    ))
+    skills.register(UuidGenSkill())
+    skills.register(PasswordGenSkill())
+    skills.register(QrGenerateSkill())
+    skills.register(CidrCalcSkill())
     skills.register(SshCommandSkill(
         enabled=ssh_enabled,
         default_identity_file=os.environ.get("SKILL_SSH_IDENTITY_FILE", ""),
@@ -146,24 +160,32 @@ def build_container() -> Container:
         private_key_content=os.environ.get("SKILL_SSH_PRIVATE_KEY", ""),
     ))
 
-    # Load markdown-defined skills from skills/ directory
+    # Late-binding callable used by pipeline steps and the scheduler so they
+    # always look up the *current* skill registry (which may have been mutated
+    # at runtime by skill_creator).
+    def skill_executor(skill_name: str, args: dict):
+        s = skills.get(skill_name)
+        if not s:
+            return {"error": f"Skill '{skill_name}' not found"}
+        return s.execute(**(args or {}))
+
+    # Load markdown-defined skills from skills/ directory.  Pass the executor
+    # so pipeline steps can call other registered skills.
     skills_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
-    for md_skill in load_markdown_skills(skills_dir):
+    for md_skill in load_markdown_skills(skills_dir, skill_executor=skill_executor):
         skills.register(md_skill)
 
     # Skill creator — lets the agent build new skills at runtime
-    skills.register(SkillCreatorSkill(skills_dir=skills_dir, skill_registry=skills))
+    skills.register(SkillCreatorSkill(
+        skills_dir=skills_dir,
+        skill_registry=skills,
+        skill_executor=skill_executor,
+    ))
 
     # Scheduler
     scheduler_db = os.path.join(data_dir, "scheduler.sqlite3")
     scheduler_store = SchedulerStore(scheduler_db)
     skills.register(ScheduleTaskSkill(scheduler_store))
-
-    def skill_executor(skill_name: str, args: dict):
-        s = skills.get(skill_name)
-        if not s:
-            return {"error": f"Skill '{skill_name}' not found"}
-        return s.execute(**args)
 
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     scheduler_runner = SchedulerRunner(
