@@ -71,26 +71,31 @@ class SkillCreatorSkill(BaseSkill):
         "steps": {
             "type": "array",
             "description": (
-                "For multi-step pipeline skills.  A list of step objects, each with: "
-                "name (required), endpoint (required), method (GET/POST, default GET), "
-                "headers (optional dict), params (optional dict), body (optional dict).  "
-                "Use {{param}} for skill input params and {{step_name.path}} to reference "
-                "previous step results.  Example: "
-                '[{"name":"get_date","endpoint":"https://api.example.com/date","method":"GET"},'
-                '{"name":"get_events","endpoint":"https://api.example.com/events?date={{get_date.date}}","method":"GET"}]'
+                "For multi-step pipeline skills.  Each step is EITHER an HTTP step "
+                "(name + endpoint + optional method/headers/params/body) "
+                "OR a skill step (name + skill + optional args) that invokes another "
+                "registered skill.  Use {{param}} for skill input params and "
+                "{{step_name.path}} to reference previous step results.  "
+                "PREFER calling existing skills over external HTTP when possible.  Example: "
+                '[{"name":"now","skill":"datetime"},'
+                '{"name":"events","endpoint":"https://api.example.com/events?date={{now.date}}"}]'
             ),
             "required": False,
         },
     }
 
-    def __init__(self, skills_dir: str, skill_registry):
+    def __init__(self, skills_dir: str, skill_registry, skill_executor=None):
         """
         Args:
             skills_dir:      Filesystem path where .md skill files are stored.
             skill_registry:  The live SkillRegistry instance so we can hot-register.
+            skill_executor:  Optional callable (skill_name, args) -> dict so newly
+                             created pipeline skills can call other registered
+                             skills as steps.
         """
         self._skills_dir = skills_dir
         self._registry = skill_registry
+        self._skill_executor = skill_executor
 
     def execute(self, **kwargs) -> Dict[str, Any]:
         action = (kwargs.get("action") or "").strip().lower()
@@ -180,7 +185,7 @@ class SkillCreatorSkill(BaseSkill):
             f.write(content)
 
         # Hot-register in the live skill registry
-        skill = MarkdownSkill(meta=meta, body=instructions)
+        skill = MarkdownSkill(meta=meta, body=instructions, skill_executor=self._skill_executor)
         self._registry.register(skill)
 
         skill_type = "pipeline" if steps else ("endpoint" if endpoint else "prompt-only")

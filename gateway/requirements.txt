@@ -7,3 +7,4 @@ python-telegram-bot==21.10
 openai==1.82.0
 pyyaml>=6.0
 sse-starlette>=2.0
+qrcode[pil]>=7.4

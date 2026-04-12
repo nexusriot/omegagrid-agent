@@ -57,10 +57,13 @@ CRITICAL RULES:
   skill first, then call it.
   - Single-endpoint skill: pass endpoint=... and method=...
   - Multi-step pipeline skill: pass steps=[...] with a list of step objects.
-    Each step has: name, endpoint, method.  Use {{{{param}}}} for input params and
-    {{{{step_name.json.path}}}} to reference a previous step's JSON response.
-    Example steps: [{{"name":"get_date","endpoint":"https://api.example.com/now"}},
-    {{"name":"check","endpoint":"https://api.example.com/lookup?d={{{{get_date.date}}}}"}}]
+    Each step is EITHER an HTTP step (name + endpoint + optional method/headers/params/body)
+    OR a skill step (name + skill + optional args) that invokes another registered skill.
+    Use {{{{param}}}} for input params and {{{{step_name.json.path}}}} to reference a
+    previous step's result.  PREFER calling existing skills over external HTTP when possible.
+    Example mixing both:
+    [{{"name":"now","skill":"datetime"}},
+     {{"name":"check","endpoint":"https://api.example.com/lookup?d={{{{now.date}}}}"}}]
   - Prompt-only skill: omit both endpoint and steps, pass instructions=...
   After creating, the new skill is immediately callable in the next step.
   Do NOT create a skill if an existing one already handles the request.

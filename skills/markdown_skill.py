@@ -49,7 +49,7 @@ class MarkdownSkill(BaseSkill):
                                      JSON response (dot-separated path)
     """
 
-    def __init__(self, meta: Dict[str, Any], body: str = ""):
+    def __init__(self, meta: Dict[str, Any], body: str = "", skill_executor=None):
         self.name = meta["name"]
         self.description = meta.get("description", "")
         self.parameters = meta.get("parameters") or {}
@@ -58,6 +58,9 @@ class MarkdownSkill(BaseSkill):
         self.body = body.strip()
         self._timeout = float(meta.get("timeout", 30))
         self._steps: List[Dict[str, Any]] = meta.get("steps") or []
+        # Optional callable: (skill_name: str, args: dict) -> dict
+        # Lets pipeline steps invoke other registered skills.
+        self._skill_executor = skill_executor
 
 
     def execute(self, **kwargs) -> Dict[str, Any]:
@@ -94,21 +97,45 @@ class MarkdownSkill(BaseSkill):
 
 
     def _execute_pipeline(self, kwargs: dict) -> Dict[str, Any]:
-        """Run steps sequentially, collecting results into a context dict."""
-        ctx: Dict[str, Any] = {}          # step_name -> parsed JSON body
+        """Run steps sequentially, collecting results into a context dict.
+
+        Each step is one of two kinds:
+          - **HTTP step** — has an `endpoint:` field
+          - **Skill step** — has a `skill:` field naming another registered skill
+        """
+        ctx: Dict[str, Any] = {}          # step_name -> parsed result
         results: List[Dict[str, Any]] = []
 
         for i, step in enumerate(self._steps):
             step_name = step.get("name") or f"step_{i+1}"
+            skill_call = step.get("skill", "")
             raw_endpoint = step.get("endpoint", "")
+
+            # ----- Skill step -----
+            if skill_call:
+                if self._skill_executor is None:
+                    parsed = {"error": "no skill executor available; pipeline cannot call other skills"}
+                else:
+                    raw_args = step.get("args") or {}
+                    resolved_args = _resolve_obj(raw_args, kwargs, ctx) if raw_args else {}
+                    try:
+                        parsed = self._skill_executor(skill_call, resolved_args)
+                    except Exception as e:
+                        parsed = {"error": str(e), "skill": skill_call}
+                ctx[step_name] = parsed
+                results.append({"step": step_name, "kind": "skill", "skill": skill_call, "body": parsed})
+                logger.debug("pipeline %s skill step %s -> %s", self.name, step_name, str(parsed)[:200])
+                continue
+
+            # ----- HTTP step -----
+            if not raw_endpoint:
+                results.append({"step": step_name, "error": "step has neither 'endpoint' nor 'skill'"})
+                continue
+
             method = (step.get("method", "GET") or "GET").upper()
             extra_headers = step.get("headers") or {}
             raw_params = step.get("params") or {}
             raw_body = step.get("body") or {}
-
-            if not raw_endpoint:
-                results.append({"step": step_name, "error": "no endpoint defined"})
-                continue
 
             # Resolve placeholders
             endpoint = _resolve_str(raw_endpoint, kwargs, ctx)
@@ -144,8 +171,8 @@ class MarkdownSkill(BaseSkill):
             preview = json.dumps(parsed, ensure_ascii=False, default=str)
             if len(preview) > 2000:
                 preview = preview[:2000] + "...(truncated)"
-            results.append({"step": step_name, "status": status_code, "body": parsed})
-            logger.debug("pipeline %s step %s: %s", self.name, step_name, preview[:200])
+            results.append({"step": step_name, "kind": "http", "status": status_code, "body": parsed})
+            logger.debug("pipeline %s http step %s: %s", self.name, step_name, preview[:200])
 
         return {
             "pipeline": self.name,
@@ -220,10 +247,15 @@ def _parse_frontmatter(text: str):
     return meta, body
 
 
-def load_markdown_skills(directory: str) -> List[MarkdownSkill]:
+def load_markdown_skills(directory: str, skill_executor=None) -> List[MarkdownSkill]:
     """Load all *.md files from directory as MarkdownSkill instances.
 
     Skips files that don't have valid frontmatter with a 'name' field.
+
+    Args:
+        directory:       Directory containing .md skill files
+        skill_executor:  Optional callable (skill_name, args) -> dict for
+                         pipeline steps that invoke other registered skills.
     """
     skills: List[MarkdownSkill] = []
     if not os.path.isdir(directory):
@@ -245,6 +277,6 @@ def load_markdown_skills(directory: str) -> List[MarkdownSkill]:
         if not meta.get("description"):
             meta["description"] = f"Skill from {fname}"
 
-        skills.append(MarkdownSkill(meta=meta, body=body))
+        skills.append(MarkdownSkill(meta=meta, body=body, skill_executor=skill_executor))
 
     return skills

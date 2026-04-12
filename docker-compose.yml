@@ -36,7 +36,7 @@ services:
       - ./data:/app/data
       - ~/.ssh/id_rsa:/app/data/id_rsa:ro
     ports:
-      - "${BACKEND_PORT}:8000"
+      - "127.0.0.1:${BACKEND_PORT}:8000"
 
   frontend:
     build:
@@ -45,7 +45,7 @@ services:
     depends_on:
       - gateway
     ports:
-      - "${FRONTEND_PORT}:80"
+      - "127.0.0.0:${FRONTEND_PORT}:80"
 
   # Uncomment to run the Telegram bot as a service
   telegram-bot:
